@@ -9,6 +9,10 @@ export interface DeduplicationOutput {
 export class DeduplicationActor extends BaseActor<VerifiedBusiness[], DeduplicationOutput> {
   readonly actorId = 'actor_deduplication';
   readonly name = 'Deduplication Actor';
+  readonly priority = 'HIGH' as const;
+  readonly blocking = true;
+  readonly timeoutMs = 2000;
+  readonly dependencies = ['actor_business_verification'];
 
   protected async run(context: ActorContext<VerifiedBusiness[]>): Promise<{
     data: DeduplicationOutput;

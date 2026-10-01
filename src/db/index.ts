@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { LeadEntity } from '@/models/Lead';
 import { Job, ActorRun } from '@/models/Job';
 
@@ -7,23 +9,93 @@ export interface CacheEntry<T = any> {
   expiresAt: number; // unix timestamp in ms
 }
 
+interface StoredDbData {
+  leads: Record<string, LeadEntity>;
+  jobs: Record<string, Job>;
+  actorRuns: Record<string, ActorRun>;
+}
+
 class LeadPilotDatabase {
   private leadsMap: Map<string, LeadEntity> = new Map();
   private jobsMap: Map<string, Job> = new Map();
   private actorRunsMap: Map<string, ActorRun> = new Map();
   private cacheMap: Map<string, CacheEntry> = new Map();
+  private filePath: string;
+  private saveDebounceTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.filePath = path.join(process.cwd(), 'data', 'leadpilot_db.json');
+    this.loadState();
+  }
+
+  private loadState(): void {
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const raw = fs.readFileSync(this.filePath, 'utf-8');
+        const parsed: StoredDbData = JSON.parse(raw);
+
+        if (parsed.leads) {
+          for (const [k, v] of Object.entries(parsed.leads)) {
+            this.leadsMap.set(k, v);
+          }
+        }
+        if (parsed.jobs) {
+          for (const [k, v] of Object.entries(parsed.jobs)) {
+            this.jobsMap.set(k, v);
+          }
+        }
+        if (parsed.actorRuns) {
+          for (const [k, v] of Object.entries(parsed.actorRuns)) {
+            this.actorRunsMap.set(k, v);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[LeadPilotDatabase] Failed to load persistent state:', err.message);
+    }
+  }
+
+  private scheduleSave(): void {
+    if (this.saveDebounceTimer) return;
+    this.saveDebounceTimer = setTimeout(() => {
+      this.saveDebounceTimer = null;
+      this.persistState();
+    }, 250);
+  }
+
+  private persistState(): void {
+    try {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const data: StoredDbData = {
+        leads: Object.fromEntries(this.leadsMap.entries()),
+        jobs: Object.fromEntries(Array.from(this.jobsMap.entries()).slice(-100)), // keep last 100 jobs
+        actorRuns: Object.fromEntries(Array.from(this.actorRunsMap.entries()).slice(-500)), // keep last 500 runs
+      };
+
+      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err: any) {
+      console.warn('[LeadPilotDatabase] Failed to persist state:', err.message);
+    }
+  }
 
   // --- Leads Operations ---
   public upsertLead(lead: LeadEntity): LeadEntity {
     lead.updatedAt = new Date().toISOString();
     this.leadsMap.set(lead.leadId, lead);
+    this.scheduleSave();
     return lead;
   }
 
   public upsertLeadsBatch(leads: LeadEntity[]): void {
     for (const lead of leads) {
-      this.upsertLead(lead);
+      lead.updatedAt = new Date().toISOString();
+      this.leadsMap.set(lead.leadId, lead);
     }
+    this.scheduleSave();
   }
 
   public getLead(leadId: string): LeadEntity | undefined {
@@ -34,9 +106,37 @@ class LeadPilotDatabase {
     return Array.from(this.leadsMap.values());
   }
 
+  /**
+   * Section 12 & 26: Finds previously discovered and verified businesses for the location & industry.
+   * Enables persistent data reuse without calling external APIs repeatedly.
+   */
+  public findLeadsByLocationAndIndustry(params: {
+    state: string;
+    city?: string;
+    industry: string;
+  }): LeadEntity[] {
+    const norm = (s?: string) => (s || '').toLowerCase().trim();
+    const targetState = norm(params.state);
+    const targetCity = params.city ? norm(params.city) : '';
+    const targetInd = norm(params.industry);
+
+    return Array.from(this.leadsMap.values()).filter((lead) => {
+      const lState = norm(lead.state);
+      const lCity = norm(lead.city);
+      const lInd = norm(lead.industry || lead.category);
+
+      const stateMatch = lState === targetState || lState.includes(targetState) || targetState.includes(lState);
+      const cityMatch = !targetCity || lCity === targetCity || lCity.includes(targetCity) || targetCity.includes(lCity);
+      const indMatch = lInd === targetInd || lInd.includes(targetInd) || targetInd.includes(lInd);
+
+      return stateMatch && cityMatch && indMatch;
+    });
+  }
+
   // --- Jobs Operations ---
   public createJob(job: Job): Job {
     this.jobsMap.set(job.id, job);
+    this.scheduleSave();
     return job;
   }
 
@@ -45,6 +145,7 @@ class LeadPilotDatabase {
     if (!existing) return undefined;
     const updated = { ...existing, ...updates };
     this.jobsMap.set(jobId, updated);
+    this.scheduleSave();
     return updated;
   }
 
@@ -61,6 +162,7 @@ class LeadPilotDatabase {
   // --- ActorRuns Operations ---
   public createActorRun(run: ActorRun): ActorRun {
     this.actorRunsMap.set(run.id, run);
+    this.scheduleSave();
     return run;
   }
 
@@ -69,6 +171,7 @@ class LeadPilotDatabase {
     if (!existing) return undefined;
     const updated = { ...existing, ...updates };
     this.actorRunsMap.set(runId, updated);
+    this.scheduleSave();
     return updated;
   }
 
@@ -105,6 +208,5 @@ class LeadPilotDatabase {
   }
 }
 
-const globalForDb = globalThis as unknown as { leadPilotDb?: LeadPilotDatabase };
-export const leadPilotDb = globalForDb.leadPilotDb ?? new LeadPilotDatabase();
-if (process.env.NODE_ENV !== 'production') globalForDb.leadPilotDb = leadPilotDb;
+export const leadPilotDb = new LeadPilotDatabase();
+

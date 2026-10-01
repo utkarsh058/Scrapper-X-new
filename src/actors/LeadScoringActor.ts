@@ -10,6 +10,10 @@ export interface BusinessWithScore extends BusinessWithAudit {
 export class LeadScoringActor extends BaseActor<BusinessWithAudit[], BusinessWithScore[]> {
   readonly actorId = 'actor_lead_scoring';
   readonly name = 'Lead Scoring Actor';
+  readonly priority = 'LOW' as const;
+  readonly blocking = false;
+  readonly timeoutMs = 5000;
+  readonly dependencies = ['actor_lead_qualification'];
 
   protected async run(context: ActorContext<BusinessWithAudit[]>): Promise<{
     data: BusinessWithScore[];

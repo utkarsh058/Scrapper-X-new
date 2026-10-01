@@ -23,7 +23,10 @@ export interface ContactEnrichmentOutput {
 export class ContactEnrichmentActor extends BaseActor<BusinessWithCrawl[], ContactEnrichmentOutput> {
   readonly actorId = 'actor_contact_enrichment';
   readonly name = 'Multi-Tier Contact Enrichment Actor';
-  readonly timeoutMs = 60000;
+  readonly priority = 'MEDIUM' as const;
+  readonly blocking = false;
+  readonly timeoutMs = 15000;
+  readonly dependencies = ['actor_deduplication'];
 
   protected async run(context: ActorContext<BusinessWithCrawl[]>): Promise<{
     data: ContactEnrichmentOutput;

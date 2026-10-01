@@ -14,6 +14,10 @@ export interface BusinessVerificationOutput {
 export class BusinessVerificationActor extends BaseActor<RawDiscoveredBusiness[], BusinessVerificationOutput> {
   readonly actorId = 'actor_business_verification';
   readonly name = 'Business Verification Actor';
+  readonly priority = 'HIGH' as const;
+  readonly blocking = true;
+  readonly timeoutMs = 2000;
+  readonly dependencies = ['actor_location_verification'];
 
   protected async run(context: ActorContext<RawDiscoveredBusiness[]>): Promise<{
     data: BusinessVerificationOutput;

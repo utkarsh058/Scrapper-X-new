@@ -220,22 +220,33 @@ export function isCoordinateInLocation(
     return false;
   }
 
-  const cleanCity = cityName?.trim();
-  const cleanState = stateName?.trim();
+  let effCity = cityName?.trim();
+  let effState = stateName?.trim();
+
+  // Inversion guard: If effCity matches a known State and effState matches a known Major City, swap them
+  if (effCity && effState) {
+    const isCityStateName = Object.keys(STATE_BOUNDS).some((s) => s.toLowerCase() === effCity!.toLowerCase());
+    const isStateCityName = Object.keys(MAJOR_CITIES_BOUNDS).some((c) => c.toLowerCase() === effState!.toLowerCase());
+    if (isCityStateName && (isStateCityName || !Object.keys(STATE_BOUNDS).some((s) => s.toLowerCase() === effState!.toLowerCase()))) {
+      const temp = effCity;
+      effCity = effState;
+      effState = temp;
+    }
+  }
 
   // If city is specified, check against city bounds
-  if (cleanCity && cleanCity.toLowerCase() !== 'all cities in this state' && cleanCity !== '') {
+  if (effCity && effCity.toLowerCase() !== 'all cities in this state' && effCity !== '') {
     let cityBbox: BoundingBox | undefined;
 
     for (const [key, bbox] of Object.entries(MAJOR_CITIES_BOUNDS)) {
-      if (key.toLowerCase() === cleanCity.toLowerCase()) {
+      if (key.toLowerCase() === effCity.toLowerCase()) {
         cityBbox = bbox;
         break;
       }
     }
 
-    if (!cityBbox && cleanState) {
-      const cacheKey = `${cleanCity.toLowerCase()}, ${cleanState.toLowerCase()}`;
+    if (!cityBbox && effState) {
+      const cacheKey = `${effCity.toLowerCase()}, ${effState.toLowerCase()}`;
       cityBbox = geoCache.get(cacheKey);
     }
 
@@ -249,9 +260,9 @@ export function isCoordinateInLocation(
   }
 
   // If state is specified, verify against state bounds
-  if (cleanState) {
+  if (effState) {
     for (const [key, bbox] of Object.entries(STATE_BOUNDS)) {
-      if (key.toLowerCase() === cleanState.toLowerCase()) {
+      if (key.toLowerCase() === effState.toLowerCase()) {
         const buffer = 0.05;
         const insideLat = lat >= bbox.south - buffer && lat <= bbox.north + buffer;
         const insideLon = lon >= bbox.west - buffer && lon <= bbox.east + buffer;

@@ -11,7 +11,10 @@ export interface BusinessWithCrawl extends BusinessWithReachability {
 export class WebsiteCrawlerActor extends BaseActor<BusinessWithReachability[], BusinessWithCrawl[]> {
   readonly actorId = 'actor_website_crawler';
   readonly name = 'Website Crawler Actor';
-  readonly timeoutMs = 60000;
+  readonly priority = 'LOW' as const;
+  readonly blocking = false;
+  readonly timeoutMs = 8000;
+  readonly dependencies = ['actor_website_reachability'];
 
   private crawler: WebsiteCrawlerProvider = internalCrawlerProvider;
 

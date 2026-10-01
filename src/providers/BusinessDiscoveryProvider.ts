@@ -48,7 +48,14 @@ export interface DiscoveryResult {
   rawCount: number;
   businesses: RawDiscoveredBusiness[];
   sourceComplete: boolean;
-  status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS';
+  status:
+    | 'COMPLETE'
+    | 'PARTIAL'
+    | 'FAILED'
+    | 'DISABLED'
+    | 'NO_RESULTS'
+    | 'PROVIDER_NOT_CONFIGURED'
+    | 'PROVIDER_FAILURE';
   statusReason?: string;
   errors?: string[];
   queryUsed?: string;

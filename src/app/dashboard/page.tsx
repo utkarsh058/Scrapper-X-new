@@ -23,6 +23,7 @@ import { SettingsView } from '@/components/views/SettingsView';
 import { mockLeads, mockMetricSummary } from '@/data/mockData';
 import { NavTab, Lead, ToastMessage, ContactFilter, WebsiteFilter, NumberOfLeads, SearchSummary, SearchStatusType, PipelineStats, ProviderStats, PipelineBreakdown, RejectedCandidateItem } from '@/types';
 import { LeadFilterCriteria } from '@/components/dashboard/LeadSearchCard';
+import { parseApiResponse, LeadPilotApiError } from '@/lib/apiClient';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<NavTab>('overview');
@@ -45,7 +46,7 @@ export default function DashboardPage() {
   // Load real persisted leads on initial mount
   React.useEffect(() => {
     fetch('/api/leads?limit=100')
-      .then((res) => res.json())
+      .then((res) => parseApiResponse(res, '/api/leads?limit=100'))
       .then((data) => {
         if (data.success && Array.isArray(data.leads) && data.leads.length > 0) {
           setLeads(data.leads);
@@ -54,6 +55,7 @@ export default function DashboardPage() {
       })
       .catch(() => {});
   }, []);
+
 
   // Modals & Panels state
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -138,7 +140,7 @@ export default function DashboardPage() {
         }),
       });
 
-      const initialData = await response.json();
+      const initialData = await parseApiResponse(response, '/api/leads/search');
 
       if (!initialData.success && initialData.status === 'FAILED') {
         setIsSearching(false);
@@ -153,13 +155,13 @@ export default function DashboardPage() {
         return;
       }
 
-      // If returned synchronously directly
+      // If returned synchronously directly (Fast Path ~1-2s)
       if (initialData.leads) {
         setIsSearching(false);
         setHasSearched(true);
         setLeads(initialData.leads || []);
         setSearchSummary(initialData.summary || null);
-        setSearchStatus(initialData.searchStatus || 'COMPLETE');
+        setSearchStatus(initialData.searchStatus || (initialData.leads.length > 0 ? 'COMPLETE' : 'NO_RESULTS'));
         setPipelineStats(initialData.pipelineStats || null);
         setProviderStats(initialData.providerStats || null);
         setPipelineBreakdown(initialData.pipelineBreakdown || null);
@@ -167,6 +169,45 @@ export default function DashboardPage() {
         setRejectionReasons(initialData.rejectionReasons || null);
         setStatusReason(initialData.statusReason || null);
         setSearchErrorMessage(null);
+
+        if (initialData.leads.length > 0) {
+          const isPartial = initialData.searchStatus === 'PARTIAL';
+          const deliveredCount = initialData.leads.length;
+          const requestedCount = criteria.limit || 50;
+          const title = isPartial
+            ? `Discovery Complete (${deliveredCount}/${requestedCount} Leads)`
+            : `Discovery Complete (${deliveredCount} Qualified Leads)`;
+          const message = isPartial
+            ? `Delivered ${deliveredCount} of ${requestedCount} leads across all configured discovery providers in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`
+            : `Discovered and verified ${deliveredCount} venues in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`;
+
+          addToast(title, message, isPartial ? 'info' : 'success');
+
+          // If background enrichment jobs were queued, progressively update leads in background (Section 14)
+          if (initialData.backgroundJobsQueued > 0 && initialData.jobId) {
+            (async () => {
+              for (let p = 0; p < 8; p++) {
+                await new Promise((r) => setTimeout(r, 2000));
+                try {
+                  const bgRes = await fetch(`/api/leads/search/${initialData.jobId}/results`);
+                  if (bgRes.ok) {
+                    const bgData = await bgRes.json();
+                    if (bgData.leads && bgData.leads.length > 0) {
+                      setLeads(bgData.leads);
+                      if (bgData.summary) setSearchSummary(bgData.summary);
+                    }
+                  }
+                } catch {}
+              }
+            })();
+          }
+        } else {
+          addToast(
+            'Search Complete',
+            `No matching businesses found in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
+            'info'
+          );
+        }
         return;
       }
 
@@ -187,16 +228,16 @@ export default function DashboardPage() {
         const progRes = await fetch(`/api/leads/search/${jobId}/progress`);
         if (!progRes.ok) continue;
 
-        const progData = await progRes.json();
+        const progData = await parseApiResponse(progRes, `/api/leads/search/${jobId}/progress`);
         if (progData.progressLog) {
           setLiveProgressLog(progData.progressLog);
         }
 
-        if (progData.status === 'COMPLETED' || progData.status === 'FAILED') {
+        if (progData.status === 'COMPLETED' || progData.status === 'DISCOVERY_COMPLETE' || progData.status === 'FAILED') {
           isDone = true;
 
           const resultsRes = await fetch(`/api/leads/search/${jobId}/results`);
-          const resultsData = await resultsRes.json();
+          const resultsData = await parseApiResponse(resultsRes, `/api/leads/search/${jobId}/results`);
 
           setIsSearching(false);
           setHasSearched(true);
@@ -214,12 +255,36 @@ export default function DashboardPage() {
             setSearchErrorMessage(null);
 
             if (resultsData.leads && resultsData.leads.length > 0) {
-              const statusText = resultsData.searchStatus === 'PARTIAL' ? ' [Partial - Source Limit]' : '';
-              addToast(
-                `Search Complete${statusText}`,
-                `Discovered ${resultsData.leads.length} real businesses in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
-                resultsData.searchStatus === 'PARTIAL' ? 'warning' : 'success'
-              );
+              const isPartial = resultsData.searchStatus === 'PARTIAL';
+              const deliveredCount = resultsData.leads.length;
+              const requestedCount = criteria.limit || 50;
+              const title = isPartial
+                ? `Discovery Complete (${deliveredCount}/${requestedCount} Leads)`
+                : `Discovery Complete (${deliveredCount} Qualified Leads)`;
+              const message = isPartial
+                ? `Delivered ${deliveredCount} of ${requestedCount} leads across all configured discovery providers in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`
+                : `Discovered and verified ${deliveredCount} venues in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`;
+
+              addToast(title, message, isPartial ? 'info' : 'success');
+
+              // If background enrichment jobs were queued, progressively update leads in background
+              if (resultsData.backgroundJobsQueued > 0) {
+                (async () => {
+                  for (let p = 0; p < 8; p++) {
+                    await new Promise((r) => setTimeout(r, 2000));
+                    try {
+                      const bgRes = await fetch(`/api/leads/search/${jobId}/results`);
+                      if (bgRes.ok) {
+                        const bgData = await bgRes.json();
+                        if (bgData.leads && bgData.leads.length > 0) {
+                          setLeads(bgData.leads);
+                          if (bgData.summary) setSearchSummary(bgData.summary);
+                        }
+                      }
+                    } catch {}
+                  }
+                })();
+              }
             } else {
               addToast(
                 'Search Complete',
@@ -250,11 +315,14 @@ export default function DashboardPage() {
       setSearchSummary(null);
       setSearchStatus('FAILED');
       setPipelineStats(null);
-      setStatusReason(err.message || 'Connection failure');
-      const msg = err.message || 'Unable to connect to business search service.';
+      const msg = err instanceof LeadPilotApiError
+        ? `${err.message}`
+        : (err.message || 'Unable to connect to business search service.');
+      setStatusReason(msg);
       setSearchErrorMessage(msg);
-      addToast('Search Error', msg, 'error');
+      addToast('Search Notice', msg, 'warning');
     }
+
   };
 
   const handleScrollToLeads = () => {

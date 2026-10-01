@@ -122,6 +122,11 @@ export interface LeadEntity {
 
   sources: string[];
   sourceEvidence: SourceEvidenceItem[];
+  enrichmentStatus?: 'DISCOVERED' | 'ENRICHING' | 'ENRICHED' | 'QUALIFIED' | 'REJECTED';
+  auditStatus?: 'PENDING' | 'AUDITING' | 'AUDITED';
+  googlePlaceId?: string;
+  osmId?: string;
+  provenance?: Record<string, { value: any; source: string; verified: boolean }>;
 
   createdAt: string;
   updatedAt: string;

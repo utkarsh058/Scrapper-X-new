@@ -71,37 +71,22 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
   const exportRef = useRef<HTMLDivElement>(null);
 
   // Multi-Source transparency logic
-  const activeProviders: string[] = [];
+  const googleCount = providerStats?.googlePlaces?.rawCount ?? 0;
+  const googleStatus = providerStats?.googlePlaces?.status || 'PROVIDER_NOT_CONFIGURED';
   const osmCount = providerStats?.osm?.rawCount ?? pipelineStats?.rawOsmCount ?? 0;
-  const webCount = providerStats?.webSearch?.rawCount ?? providerStats?.web?.rawCount ?? 0;
-  const bpCount = providerStats?.businessProvider?.rawCount ?? 0;
-  const bpStatus = providerStats?.businessProvider?.status || 'DISABLED';
-  const dirCount = providerStats?.directory?.rawCount ?? 0;
+  const osmStatus = providerStats?.osm?.status || 'NOT_NEEDED';
   const mergedUnique = pipelineBreakdown?.deduplicatedCount ?? pipelineStats?.deduplicatedCount ?? 0;
   const enrichedCount = pipelineBreakdown?.phoneOrEmailCount ?? summary?.hasPhoneOrEmail ?? 0;
   const requestedLimit = pipelineStats?.requestedLimit ?? 100;
 
-  if (osmCount > 0 && providerStats?.osm?.status !== 'FAILED') {
-    activeProviders.push('OSM');
-  }
-  if (webCount > 0 && (providerStats?.web?.status === 'COMPLETE' || providerStats?.webSearch?.status === 'COMPLETE')) {
-    activeProviders.push('Web Search');
-  }
-  if (bpCount > 0 && bpStatus === 'COMPLETE') {
-    activeProviders.push('Business Provider');
-  }
-  if (dirCount > 0 && providerStats?.directory?.status === 'COMPLETE') {
-    activeProviders.push('Directory');
-  }
-
-  const isMultiSource = activeProviders.length > 1;
-  const providerLabel = isMultiSource
-    ? `Multi-Source: ${activeProviders.join(' + ')}`
-    : activeProviders.length === 1 && activeProviders[0] === 'OSM'
-      ? 'Source: OpenStreetMap'
-      : activeProviders.length === 1
-        ? `Source: ${activeProviders[0]}`
-        : 'Source: OpenStreetMap';
+  const isGoogleExecuted = googleCount > 0 && (googleStatus === 'COMPLETE' || googleStatus === 'SUCCESS' || googleStatus === 'PARTIAL');
+  const providerLabel = isGoogleExecuted
+    ? 'PRIMARY: Google Places'
+    : googleStatus === 'PROVIDER_NOT_CONFIGURED'
+      ? 'PRIMARY: Google Places (Not Configured, Fallback: OSM)'
+      : googleStatus === 'FAILED' || googleStatus === 'PROVIDER_FAILURE'
+        ? 'PRIMARY: Google Places (Failed, Fallback: OSM)'
+        : 'PRIMARY: Google Places';
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -185,6 +170,21 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
       unreachable,
     };
   }, [leads, summary]);
+
+  // Section 36: Contact Action Tracking
+  const handleContactAction = async (lead: Lead, action: string, channel: 'phone' | 'email' | 'whatsapp' | 'manual') => {
+    try {
+      const placeId = (lead as any).googlePlaceId || lead.osmId || lead.id;
+      await fetch('/api/leads/contact-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ placeId, leadId: lead.id, action, channel }),
+      });
+      onShowToast(`Recorded ${action}`, `Updated contact history for ${lead.businessName}.`, 'success');
+    } catch (err: any) {
+      console.warn('Failed to record contact action:', err);
+    }
+  };
 
   // Export handler
   const handleExport = (format: 'CSV' | 'Excel') => {
@@ -416,21 +416,27 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
         <div className="px-5 py-2.5 bg-slate-900 text-slate-300 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-[11.5px]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-white flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${searchStatus === 'COMPLETE' ? 'bg-teal-400' : 'bg-amber-400 animate-pulse'}`} />
+              <span className={`w-2 h-2 rounded-full ${
+                searchStatus === 'COMPLETE'
+                  ? 'bg-teal-400'
+                  : searchStatus === 'PROVIDER_FAILURE'
+                  ? 'bg-rose-400'
+                  : searchStatus === 'PROVIDER_NOT_CONFIGURED'
+                  ? 'bg-amber-400'
+                  : 'bg-blue-400 animate-pulse'
+              }`} />
               {providerLabel}
             </span>
             <span className="text-slate-600">|</span>
-            <span>OSM: <strong className="text-white">{osmCount}</strong></span>
+            <span>Google: <strong className="text-white">{googleStatus === 'PROVIDER_NOT_CONFIGURED' ? 'Not Configured' : googleStatus === 'PROVIDER_FAILURE' || googleStatus === 'FAILED' ? 'Failed' : googleCount}</strong></span>
             <span>•</span>
-            <span>Web Search: <strong className="text-white">{webCount}</strong></span>
+            <span>OSM fallback: <strong className="text-white">{osmStatus === 'PROVIDER_NOT_CONFIGURED' ? 'Disabled' : osmStatus === 'PROVIDER_FAILURE' || osmStatus === 'FAILED' ? 'Failed' : osmStatus === 'NOT_NEEDED' ? '0' : osmCount}</strong></span>
             <span>•</span>
-            <span>Business Provider: <strong className="text-white">{bpStatus === 'DISABLED' ? 'Disabled' : bpStatus === 'FAILED' ? 'Failed' : bpCount}</strong></span>
-            <span>•</span>
-            <span>Merged Unique: <strong className="text-white">{mergedUnique}</strong></span>
+            <span>Merged: <strong className="text-white">{mergedUnique}</strong></span>
             <span>•</span>
             <span>Enriched: <strong className="text-white">{enrichedCount}</strong></span>
             <span>•</span>
-            <span>Delivered: <strong className="text-teal-300 font-bold">{leads.length}</strong> of {requestedLimit} requested</span>
+            <span>Delivered: <strong className="text-teal-300 font-bold">{leads.length}</strong> / {requestedLimit}</span>
           </div>
 
           <div className="flex items-center gap-2.5">
@@ -617,33 +623,60 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
 
         {/* State C: API Error */}
         {hasSearched && !isSearching && errorMessage && (
-          <div className="flex flex-col items-center justify-center py-16 px-4 text-center animate-fade-in">
+          <div className="flex flex-col items-center justify-center py-12 px-4 text-center animate-fade-in">
             <div className="h-12 w-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-700 mb-3.5 border border-amber-200">
               <AlertTriangle className="h-6 w-6 text-amber-600" />
             </div>
             <h3 className="text-[16px] font-bold text-[#0F172A]">
-              Notice
+              Lead Search Notice
             </h3>
-            <p className="text-[13px] text-[#475569] max-w-md mt-1.5 leading-relaxed">
+            <p className="text-[13px] text-[#475569] max-w-lg mt-1.5 leading-relaxed">
               {errorMessage}
             </p>
           </div>
         )}
 
-        {/* State D: Search Finished, Zero Results */}
+
+        {/* State D: Search Finished, Zero Results or Provider Issues */}
         {hasSearched && !isSearching && !errorMessage && leads.length === 0 && (
           <div className="p-6 space-y-6 animate-fade-in">
-            <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
-              <div className="h-12 w-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-600 mb-3 border border-amber-200">
-                <AlertCircle className="h-6 w-6 text-amber-600" />
+            {searchStatus === 'PROVIDER_NOT_CONFIGURED' ? (
+              <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+                <div className="h-12 w-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-600 mb-3 border border-amber-200">
+                  <AlertTriangle className="h-6 w-6 text-amber-600" />
+                </div>
+                <h3 className="text-[16px] font-bold text-[#0F172A]">
+                  Google Places Provider Not Configured
+                </h3>
+                <p className="text-[13px] text-[#64748B] max-w-lg mt-1 leading-relaxed">
+                  Google Places is designated as Primary Discovery Provider, but <code className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-[11px] font-mono">GOOGLE_PLACES_API_KEY</code> is not configured on the server. OpenStreetMap fallback was executed.
+                </p>
               </div>
-              <h3 className="text-[16px] font-bold text-[#0F172A]">
-                0 Qualified Leads Delivered
-              </h3>
-              <p className="text-[13px] text-[#64748B] max-w-lg mt-1 leading-relaxed">
-                The pipeline discovered {pipelineBreakdown?.rawDiscoveredCount || pipelineStats?.rawOsmCount || 0} candidate businesses, but none satisfied the required filter criteria. Complete rejection breakdown is detailed below.
-              </p>
-            </div>
+            ) : searchStatus === 'PROVIDER_FAILURE' ? (
+              <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+                <div className="h-12 w-12 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-600 mb-3 border border-rose-200">
+                  <AlertCircle className="h-6 w-6 text-rose-600" />
+                </div>
+                <h3 className="text-[16px] font-bold text-[#0F172A]">
+                  Discovery Provider Failure
+                </h3>
+                <p className="text-[13px] text-[#64748B] max-w-lg mt-1 leading-relaxed">
+                  External discovery providers encountered an upstream network failure or timeout. Please check server connectivity or retry with a narrower city query.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+                <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-600 mb-3 border border-slate-200">
+                  <AlertCircle className="h-6 w-6 text-slate-600" />
+                </div>
+                <h3 className="text-[16px] font-bold text-[#0F172A]">
+                  0 Qualified Leads Delivered
+                </h3>
+                <p className="text-[13px] text-[#64748B] max-w-lg mt-1 leading-relaxed">
+                  The pipeline discovered {pipelineBreakdown?.rawDiscoveredCount || pipelineStats?.rawOsmCount || 0} candidate businesses, but none satisfied the required filter criteria. Complete rejection breakdown is detailed below.
+                </p>
+              </div>
+            )}
 
             {/* Rejection Breakdown Counters (11 items) */}
             <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
@@ -887,10 +920,18 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                     {/* 4. Phone */}
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">
                       {hasPhone ? (
-                        <div className="inline-flex items-center gap-1.5 text-[#0F172A] font-medium" title={phone}>
+                        <a
+                          href={`tel:${phone}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleContactAction(lead, 'CALL_ATTEMPTED', 'phone');
+                          }}
+                          className="inline-flex items-center gap-1.5 text-[#0F172A] hover:text-teal-700 font-medium hover:underline cursor-pointer"
+                          title={`Call ${phone} (Click to record action)`}
+                        >
                           <Phone className="h-3.5 w-3.5 text-teal-600 shrink-0" />
                           <span>{phone}</span>
-                        </div>
+                        </a>
                       ) : (
                         <span className="text-[#94A3B8]">N/A</span>
                       )}
@@ -899,10 +940,18 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                     {/* 5. Email */}
                     <td className="px-3 py-3.5 align-top">
                       {hasEmail ? (
-                        <div className="inline-flex items-center gap-1.5 text-[#0F172A] font-medium" title={email}>
+                        <a
+                          href={`mailto:${email}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleContactAction(lead, 'EMAIL_SENT', 'email');
+                          }}
+                          className="inline-flex items-center gap-1.5 text-[#0F172A] hover:text-teal-700 font-medium hover:underline cursor-pointer"
+                          title={`Email ${email} (Click to record action)`}
+                        >
                           <Mail className="h-3.5 w-3.5 text-teal-600 shrink-0" />
                           <span className="truncate max-w-[140px]">{email}</span>
-                        </div>
+                        </a>
                       ) : (
                         <span className="text-[#94A3B8]">N/A</span>
                       )}

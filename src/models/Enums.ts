@@ -1,8 +1,14 @@
 export type ActorStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'SKIPPED';
 
-export type JobStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'CANCELLED';
+export type JobStatus = 'PENDING' | 'RUNNING' | 'DISCOVERY_COMPLETE' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'CANCELLED';
 
-export type SearchStatusType = 'COMPLETE' | 'PARTIAL' | 'NO_RESULTS' | 'FAILED';
+export type SearchStatusType =
+  | 'COMPLETE'
+  | 'PARTIAL'
+  | 'NO_RESULTS'
+  | 'FAILED'
+  | 'PROVIDER_NOT_CONFIGURED'
+  | 'PROVIDER_FAILURE';
 
 export type RejectionReason =
   | 'OUTSIDE_LOCATION'

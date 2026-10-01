@@ -16,6 +16,10 @@ export interface LocationVerificationOutput {
 export class LocationVerificationActor extends BaseActor<LocationVerificationInput, LocationVerificationOutput> {
   readonly actorId = 'actor_location_verification';
   readonly name = 'Location Verification Actor';
+  readonly priority = 'HIGH' as const;
+  readonly blocking = true;
+  readonly timeoutMs = 2000;
+  readonly dependencies = ['actor_business_discovery'];
 
   protected async run(context: ActorContext<LocationVerificationInput>): Promise<{
     data: LocationVerificationOutput;
@@ -29,7 +33,7 @@ export class LocationVerificationActor extends BaseActor<LocationVerificationInp
 
     for (const b of businesses) {
       if (b.latitude && b.longitude) {
-        const inBounds = isCoordinateInLocation(b.latitude, b.longitude, state, city);
+        const inBounds = isCoordinateInLocation(b.latitude, b.longitude, city, state);
         if (!inBounds) {
           rejected.push({ business: b, reason: 'OUTSIDE_LOCATION' });
           continue;

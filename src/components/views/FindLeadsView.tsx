@@ -17,6 +17,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { Lead } from '@/types';
+import { parseApiResponse, LeadPilotApiError } from '@/lib/apiClient';
 
 interface FindLeadsViewProps {
   onSelectLead: (lead: Lead) => void;
@@ -42,7 +43,7 @@ export const FindLeadsView: React.FC<FindLeadsViewProps> = ({
     setIsScanning(true);
 
     try {
-      const res = await fetch('/api/leads/search', {
+      const res = await fetch('/api/leads/search?sync=true', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -53,13 +54,14 @@ export const FindLeadsView: React.FC<FindLeadsViewProps> = ({
           contactFilter: 'All Contacts',
           websiteFilter: 'Any Website',
           limit: 50,
+          sync: true,
         }),
       });
 
-      const data = await res.json();
+      const data = await parseApiResponse(res, '/api/leads/search?sync=true');
       setIsScanning(false);
 
-      if (data.success) {
+      if (data.success && Array.isArray(data.leads)) {
         const newBatch = {
           id: `batch-${Date.now()}`,
           title: `${city ? `${city}, ` : ''}${stateName} ${industry}`,
@@ -83,9 +85,11 @@ export const FindLeadsView: React.FC<FindLeadsViewProps> = ({
       }
     } catch (err: any) {
       setIsScanning(false);
-      onShowToast('Scan Error', err.message || 'Pipeline network failure.', 'error');
+      const errorMsg = err instanceof LeadPilotApiError ? err.message : (err.message || 'Pipeline network failure.');
+      onShowToast('Scan Notice', errorMsg, 'warning');
     }
   };
+
 
   return (
     <div className="space-y-5 animate-fade-in">

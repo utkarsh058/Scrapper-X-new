@@ -11,6 +11,10 @@ export interface BusinessWithAudit extends BusinessWithContacts {
 export class WebsiteAuditActor extends BaseActor<BusinessWithContacts[], BusinessWithAudit[]> {
   readonly actorId = 'actor_website_audit';
   readonly name = 'Website Audit Actor';
+  readonly priority = 'LOW' as const;
+  readonly blocking = false;
+  readonly timeoutMs = 30000;
+  readonly dependencies = ['actor_contact_extraction'];
 
   private auditor: WebsiteAuditProvider = lighthouseAuditProvider;
 

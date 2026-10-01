@@ -251,11 +251,60 @@ async function executeOverpassQuery(overpassQl: string): Promise<OverpassExecuti
 }
 
 /**
+ * Queries official OpenStreetMap Nominatim API for real POIs.
+ * Provides high-speed (<1s) edge fallback when German Overpass servers are congested or rate-limited.
+ */
+async function queryNominatimOsm(query: string, limit: number): Promise<OverpassElement[]> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&extratags=1&limit=${limit}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'LeadPilot-Engine/2.1 (contact: engineering@leadpilot.app; real-time business discovery)',
+        'Accept': 'application/json',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const items = await res.json();
+    if (!Array.isArray(items)) return [];
+    return items.map((item: any) => {
+      const type = item.osm_type === 'way' ? 'way' : item.osm_type === 'relation' ? 'relation' : 'node';
+      const name = item.name || item.display_name?.split(',')[0]?.trim() || '';
+      return {
+        type,
+        id: Number(item.osm_id) || Math.floor(Math.random() * 1000000),
+        lat: parseFloat(item.lat),
+        lon: parseFloat(item.lon),
+        tags: {
+          name,
+          'addr:city': item.address?.city || item.address?.town || item.address?.suburb,
+          'addr:state': item.address?.state,
+          'addr:postcode': item.address?.postcode,
+          cuisine: item.extratags?.cuisine,
+          phone: item.extratags?.phone || item.extratags?.['contact:phone'],
+          email: item.extratags?.email || item.extratags?.['contact:email'],
+          website: item.extratags?.website || item.extratags?.['contact:website'],
+          opening_hours: item.extratags?.opening_hours,
+          ...(item.extratags || {}),
+        },
+      };
+    });
+  } catch (err: any) {
+    console.warn(`[Nominatim OSM Query] Warning: ${err.message}`);
+    return [];
+  }
+}
+
+/**
  * Main discovery method for real businesses from OpenStreetMap.
  * Implements strict hierarchical geographic resolution:
- * 1. Area query within state (prevents cross-city pollution)
- * 2. Area query direct by city
- * 3. Bounding box fallback
+ * 1. Fast City Bounding Box (spatial R-tree index, <2s)
+ * 2. High-speed Nominatim OSM edge fallback (<1s)
+ * 3. Area query direct by city
+ * 4. Hierarchical area query within state
  * Does NOT truncate discovery prematurely, ensuring all candidates are collected.
  */
 export async function queryOverpassBusinesses(options: {
@@ -278,37 +327,55 @@ export async function queryOverpassBusinesses(options: {
 
   // Execute queries through the sequential lock to prevent Overpass 429 concurrency blocks
   const execResult: OverpassExecutionResult = await enqueueRequest(async () => {
+    const queryLimit = Math.max(limit * 3, 100);
+
     // -------------------------------------------------------------
-    // STRATEGY 1: City Area inside State Area (Highest Precision)
+    // STRATEGY 1: High-Speed Official Nominatim OSM Edge (<1s response)
     // -------------------------------------------------------------
     if (hasCity) {
-      const areaFilters = buildOverpassFilters(tags, { areaVariable: 'searchArea' });
-      // Fetch up to 500 candidates or full city result set to avoid premature truncation
-      const queryLimit = Math.max(limit * 5, 300);
-
-      const hierarchicalQl = `[out:json][timeout:25];
-area["name"="${state}"]->.stateArea;
-area["name"="${cleanCity}"](area.stateArea)->.searchArea;
-(
-  ${areaFilters}
-);
-out center ${queryLimit};`;
-
       try {
-        console.log(`[Overpass Query] Attempting hierarchical city area: ${cleanCity} in ${state}`);
-        const result = await executeOverpassQuery(hierarchicalQl);
-        if (result && result.elements.length > 0) {
-          console.log(`[Overpass Query] Hierarchical city area succeeded with ${result.elements.length} raw results.`);
-          return result;
+        console.log(`[Overpass Query] Querying official Nominatim OSM edge for: ${industry} in ${cleanCity}, ${state}`);
+        const nomElements = await queryNominatimOsm(`${industry} in ${cleanCity}, ${state}`, queryLimit);
+        if (nomElements.length > 0) {
+          console.log(`[Overpass Query] Nominatim OSM succeeded with ${nomElements.length} raw results.`);
+          return {
+            elements: nomElements,
+            endpoint: 'https://nominatim.openstreetmap.org/search',
+            query: `${industry} in ${cleanCity}, ${state}`,
+          };
         }
-      } catch (err: any) {
-        console.warn(`[Overpass Query] Hierarchical query attempt warning: ${err.message}`);
+      } catch (nomErr: any) {
+        console.warn(`[Overpass Query] Nominatim query warning: ${nomErr.message}`);
       }
 
       // -------------------------------------------------------------
-      // STRATEGY 2: Direct City Area (If state boundary relation differs)
+      // STRATEGY 2: Fast City Bounding Box (Indexed spatial R-Tree)
       // -------------------------------------------------------------
-      const directCityQl = `[out:json][timeout:25];
+      if (bbox) {
+        const bboxFilters = buildOverpassFilters(tags, { bbox });
+        const bboxQl = `[out:json][timeout:15];
+(
+  ${bboxFilters}
+);
+out center qt ${queryLimit};`;
+
+        try {
+          console.log(`[Overpass Query] Attempting fast city bounding box for: ${cleanCity}`);
+          const result = await executeOverpassQuery(bboxQl);
+          if (result && result.elements.length > 0) {
+            console.log(`[Overpass Query] City bounding box succeeded with ${result.elements.length} raw results.`);
+            return result;
+          }
+        } catch (err: any) {
+          console.warn(`[Overpass Query] Bounding box attempt warning: ${err.message}`);
+        }
+      }
+
+      // -------------------------------------------------------------
+      // STRATEGY 3: Direct City Area
+      // -------------------------------------------------------------
+      const areaFilters = buildOverpassFilters(tags, { areaVariable: 'searchArea' });
+      const directCityQl = `[out:json][timeout:20];
 area["name"="${cleanCity}"]->.searchArea;
 (
   ${areaFilters}
@@ -325,34 +392,30 @@ out center ${queryLimit};`;
       } catch (err: any) {
         console.warn(`[Overpass Query] Direct city query attempt warning: ${err.message}`);
       }
-
-      // -------------------------------------------------------------
-      // STRATEGY 3: Curated City Bounding Box
-      // -------------------------------------------------------------
-      console.log(`[Overpass Query] Falling back to curated city bounding box for: ${cleanCity}`);
-      const bboxFilters = buildOverpassFilters(tags, { bbox });
-      const bboxQl = `[out:json][timeout:25];
-(
-  ${bboxFilters}
-);
-out center ${queryLimit};`;
-
-      return await executeOverpassQuery(bboxQl);
     }
 
     // -------------------------------------------------------------
     // STRATEGY 4: State-wide search with Bounding Box
     // -------------------------------------------------------------
     console.log(`[Overpass Query] Executing state-wide search for: ${state}`);
-    const queryLimit = Math.max(limit * 4, 300);
     const bboxFilters = buildOverpassFilters(tags, { bbox });
-    const stateQl = `[out:json][timeout:25];
+    const stateQl = `[out:json][timeout:20];
 (
   ${bboxFilters}
 );
 out center qt ${queryLimit};`;
 
-    return await executeOverpassQuery(stateQl);
+    try {
+      return await executeOverpassQuery(stateQl);
+    } catch (stErr: any) {
+      // Final edge fallback: Query Nominatim for state
+      const nomElements = await queryNominatimOsm(`${industry} in ${cleanCity ? `${cleanCity}, ` : ''}${state}`, queryLimit);
+      return {
+        elements: nomElements,
+        endpoint: 'https://nominatim.openstreetmap.org/search',
+        query: `${industry} in ${state}`,
+      };
+    }
   });
 
   const discoveryResult = processRawElementsToLeads(

@@ -1,15 +1,21 @@
 import { BaseActor, ActorContext } from '@/models/Actor';
-import { RawDiscoveredBusiness, SearchDiscoveryParams, DiscoveryResult } from '@/providers/BusinessDiscoveryProvider';
-import { osmOverpassProvider } from '@/providers/OSMOverpassProvider';
-import { secondaryBusinessDataProvider } from '@/providers/SecondaryBusinessDataProvider';
-import { webSearchDiscoveryProvider } from '@/providers/WebSearchDiscoveryProvider';
-import { directoryDiscoveryProvider } from '@/providers/DirectoryDiscoveryProvider';
-import { leadPilotDb } from '@/db';
+import { RawDiscoveredBusiness, SearchDiscoveryParams } from '@/providers/BusinessDiscoveryProvider';
+import { googleDiscoveryCache } from '@/lib/cache/GoogleDiscoveryCache';
+import { providerManager } from '@/lib/providers/ProviderManager';
 
 export interface ProviderStat {
   rawCount: number;
   discovered?: number;
-  status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS';
+  status:
+    | 'COMPLETE'
+    | 'PARTIAL'
+    | 'FAILED'
+    | 'DISABLED'
+    | 'NO_RESULTS'
+    | 'NOT_NEEDED'
+    | 'SUCCESS'
+    | 'PROVIDER_NOT_CONFIGURED'
+    | 'PROVIDER_FAILURE';
   durationMs: number;
   reason?: string;
   errors?: string[];
@@ -20,22 +26,31 @@ export interface BusinessDiscoveryOutput {
   rawCount: number;
   sourceComplete: boolean;
   statusReason?: string;
+  sourceStatus?: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'NO_RESULTS' | 'PROVIDER_FAILURE' | 'PROVIDER_NOT_CONFIGURED';
   queryUsed?: string;
   endpointUsed?: string;
   providerStats: {
     osm: ProviderStat;
+    googlePlaces?: ProviderStat;
     web: ProviderStat;
     webSearch: ProviderStat;
     businessProvider: ProviderStat;
     directory: ProviderStat;
   };
   totalDiscovered: number;
+  googleLatencyMs?: number;
+  osmLatencyMs?: number;
+  cacheHit?: boolean;
 }
 
 export class BusinessDiscoveryActor extends BaseActor<SearchDiscoveryParams, BusinessDiscoveryOutput> {
   readonly actorId = 'actor_business_discovery';
-  readonly name = 'Multi-Source Business Discovery Actor';
-  readonly timeoutMs = 90000;
+  readonly name = 'Primary Google Places & OSM Discovery Actor';
+  readonly priority = 'HIGH' as const;
+  readonly blocking = true;
+  readonly timeoutMs = 15000;
+  readonly dependencies = [];
+  readonly estimatedCost = 1;
 
   protected async run(context: ActorContext<SearchDiscoveryParams>): Promise<{
     data: BusinessDiscoveryOutput;
@@ -44,182 +59,119 @@ export class BusinessDiscoveryActor extends BaseActor<SearchDiscoveryParams, Bus
   }> {
     const params = context.input;
     const loc = params.city ? `${params.city}, ${params.state}` : params.state;
-    context.onProgress?.(`Initiating parallel multi-source discovery for ${params.industry} in ${loc}...`);
+    context.onProgress?.(`Initiating business discovery (Google Places Primary + OSM Fallback) for ${params.industry} in ${loc}...`);
 
-    // Over-collection target: Request 2x-3x the desired lead count (min 150) to allow for filtration
-    const overCollectTarget = Math.max(150, (params.limit || 50) * 2);
-    const multiParams: SearchDiscoveryParams = {
-      ...params,
-      limit: overCollectTarget,
-    };
+    const requestedLimit = Math.max(Number(params.limit) || 25, 5);
 
-    const cacheKey = `multi_discovery_v4:${params.industry}:${params.state}:${params.city || 'all'}`;
-    const cached = leadPilotDb.getCache<BusinessDiscoveryOutput>(cacheKey);
+    // 1. Caching & In-flight Request Deduplication via GoogleDiscoveryCache
+    const searchKey = googleDiscoveryCache.generateSearchKey({
+      industry: params.industry,
+      state: params.state,
+      city: params.city,
+      country: params.country,
+      limit: requestedLimit,
+    });
 
-    if (cached) {
+    const cached = googleDiscoveryCache.getSearchQueryResults<BusinessDiscoveryOutput>(searchKey);
+    if (cached && cached.rawCount > 0) {
       context.onProgress?.(
-        `Retrieved ${cached.rawCount} multi-source candidates from discovery cache (OSM: ${cached.providerStats.osm.rawCount}, Web: ${cached.providerStats.web.rawCount}, Business Provider: ${cached.providerStats.businessProvider.rawCount})`,
+        `Retrieved ${cached.rawCount} businesses immediately from query cache (TTL active).`,
         cached.rawCount
       );
       return {
-        data: cached,
-        sources: ['Multi-Source Discovery Cache'],
-        warnings: ['Served from multi-source discovery cache.'],
+        data: {
+          ...cached,
+          cacheHit: true,
+        },
+        sources: ['Google Discovery Cache'],
+        warnings: ['Served from 24-hour query cache.'],
       };
     }
 
-    // Execute OSM, Secondary Business Provider, Web Search, and Directory concurrently
-    const [osmSettled, bpSettled, webSettled, dirSettled] = await Promise.allSettled([
-      osmOverpassProvider.discoverBusinesses(multiParams),
-      secondaryBusinessDataProvider.discoverBusinesses(multiParams),
-      webSearchDiscoveryProvider.discoverBusinesses(multiParams),
-      directoryDiscoveryProvider.discoverBusinesses(multiParams),
-    ]);
+    // 2. Delegate to ProviderManager for orchestrated primary Google Places + fallback OSM
+    const managerResult = await providerManager.executeDiscovery(params, context.onProgress);
 
-    const allBusinesses: RawDiscoveredBusiness[] = [];
     const activeSources: string[] = [];
-    const warnings: string[] = [];
+    if (managerResult.providers.googlePlaces.rawCount > 0) activeSources.push('Google Places API');
+    if (managerResult.providers.osm.rawCount > 0) activeSources.push('OpenStreetMap');
+    if (activeSources.length === 0) {
+      activeSources.push(managerResult.primaryProvider === 'google_places' ? 'Google Places API' : 'OpenStreetMap');
+    }
 
-    // 1. Process OSM Overpass result (Baseline)
-    const osmStat: ProviderStat = {
+    const dummyStat = (status: 'DISABLED' | 'NOT_NEEDED'): ProviderStat => ({
       rawCount: 0,
       discovered: 0,
-      status: 'FAILED',
+      status,
       durationMs: 0,
       errors: [],
+    });
+
+    const gStat: ProviderStat = {
+      rawCount: managerResult.providers.googlePlaces.rawCount,
+      discovered: managerResult.providers.googlePlaces.rawCount,
+      status: managerResult.providers.googlePlaces.status as any,
+      durationMs: managerResult.latencies.googleMs,
+      reason: managerResult.providers.googlePlaces.reason,
+      errors: managerResult.providers.googlePlaces.errors,
     };
-    if (osmSettled.status === 'fulfilled') {
-      const res = osmSettled.value;
-      osmStat.rawCount = res.rawCount;
-      osmStat.discovered = res.rawCount;
-      osmStat.status = res.status;
-      osmStat.durationMs = res.durationMs;
-      osmStat.reason = res.statusReason;
-      osmStat.errors = res.errors || [];
-      allBusinesses.push(...res.businesses);
-      activeSources.push(res.providerName);
-      context.onProgress?.(`OSM: Discovered ${res.rawCount} candidates in ${(res.durationMs / 1000).toFixed(1)}s`, res.rawCount);
-    } else {
-      osmStat.status = 'FAILED';
-      const msg = osmSettled.reason?.message || 'OSM query timed out or failed';
-      osmStat.reason = msg;
-      osmStat.errors = [msg];
-      warnings.push(`OSM provider failed: ${msg}`);
-    }
 
-    // 2. Process Secondary Business Data Provider result
-    const bpStat: ProviderStat = {
-      rawCount: 0,
-      discovered: 0,
-      status: 'DISABLED',
-      durationMs: 0,
-      errors: [],
+    const oStat: ProviderStat = {
+      rawCount: managerResult.providers.osm.rawCount,
+      discovered: managerResult.providers.osm.rawCount,
+      status: managerResult.providers.osm.status as any,
+      durationMs: managerResult.latencies.osmMs,
+      reason: managerResult.providers.osm.reason,
+      errors: managerResult.providers.osm.errors,
     };
-    if (bpSettled.status === 'fulfilled') {
-      const res = bpSettled.value;
-      bpStat.rawCount = res.rawCount;
-      bpStat.discovered = res.rawCount;
-      bpStat.status = res.status;
-      bpStat.durationMs = res.durationMs;
-      bpStat.reason = res.statusReason;
-      bpStat.errors = res.errors || [];
-      if (res.rawCount > 0) {
-        allBusinesses.push(...res.businesses);
-        activeSources.push(res.providerName);
-      }
-      context.onProgress?.(`Business Provider: [${res.status}] ${res.rawCount} candidates in ${(res.durationMs / 1000).toFixed(1)}s`, res.rawCount);
-    } else {
-      bpStat.status = 'FAILED';
-      const msg = bpSettled.reason?.message || 'Secondary business data provider failed';
-      bpStat.reason = msg;
-      bpStat.errors = [msg];
-      warnings.push(`Secondary business data provider failed: ${msg}`);
-    }
 
-    // 3. Process Public Web Search result
-    const webStat: ProviderStat = {
-      rawCount: 0,
-      discovered: 0,
-      status: 'FAILED',
-      durationMs: 0,
-      errors: [],
+    const wStat: ProviderStat = {
+      rawCount: managerResult.providers.webSearch?.rawCount || 0,
+      discovered: managerResult.providers.webSearch?.rawCount || 0,
+      status: (managerResult.providers.webSearch?.status || 'NOT_NEEDED') as any,
+      durationMs: managerResult.latencies.webMs || 0,
+      reason: managerResult.providers.webSearch?.reason,
+      errors: managerResult.providers.webSearch?.errors,
     };
-    if (webSettled.status === 'fulfilled') {
-      const res = webSettled.value;
-      webStat.rawCount = res.rawCount;
-      webStat.discovered = res.rawCount;
-      webStat.status = res.status;
-      webStat.durationMs = res.durationMs;
-      webStat.reason = res.statusReason;
-      webStat.errors = res.errors || [];
-      if (res.rawCount > 0) {
-        allBusinesses.push(...res.businesses);
-        activeSources.push(res.providerName);
-      }
-      context.onProgress?.(`Web Search: Discovered ${res.rawCount} candidates in ${(res.durationMs / 1000).toFixed(1)}s`, res.rawCount);
-    } else {
-      webStat.status = 'FAILED';
-      const msg = webSettled.reason?.message || 'Web search query timed out or failed';
-      webStat.reason = msg;
-      webStat.errors = [msg];
-      warnings.push(`Web discovery failed: ${msg}`);
-    }
 
-    // 4. Process Directory result
-    const dirStat: ProviderStat = {
-      rawCount: 0,
-      discovered: 0,
-      status: 'FAILED',
-      durationMs: 0,
-      errors: [],
+    const dStat: ProviderStat = {
+      rawCount: managerResult.providers.directory?.rawCount || 0,
+      discovered: managerResult.providers.directory?.rawCount || 0,
+      status: (managerResult.providers.directory?.status || 'NOT_NEEDED') as any,
+      durationMs: managerResult.latencies.directoryMs || 0,
+      reason: managerResult.providers.directory?.reason,
+      errors: managerResult.providers.directory?.errors,
     };
-    if (dirSettled.status === 'fulfilled') {
-      const res = dirSettled.value;
-      dirStat.rawCount = res.rawCount;
-      dirStat.discovered = res.rawCount;
-      dirStat.status = (res.sourceComplete ? 'COMPLETE' : 'PARTIAL') as any;
-      dirStat.durationMs = res.durationMs;
-      dirStat.reason = res.statusReason;
-      if (res.rawCount > 0) {
-        allBusinesses.push(...res.businesses);
-        activeSources.push(res.providerName);
-      }
-    } else {
-      dirStat.status = 'FAILED';
-      dirStat.reason = dirSettled.reason?.message || 'Directory query timed out or failed';
-    }
-
-    const totalDiscovered = allBusinesses.length;
-    const sourceComplete = osmStat.status === 'COMPLETE' && totalDiscovered > 0;
-
-    let statusReason = `Discovered ${totalDiscovered} total candidate businesses across ${activeSources.length} providers.`;
-    if (totalDiscovered === 0) {
-      statusReason = `No business records found across available providers for ${params.industry} in ${loc}.`;
-    }
 
     const output: BusinessDiscoveryOutput = {
-      businesses: allBusinesses,
-      rawCount: totalDiscovered,
-      sourceComplete,
-      statusReason,
-      queryUsed: osmSettled.status === 'fulfilled' ? osmSettled.value.queryUsed : undefined,
-      endpointUsed: osmSettled.status === 'fulfilled' ? osmSettled.value.endpointUsed : undefined,
+      businesses: managerResult.businesses,
+      rawCount: managerResult.totalDiscovered,
+      sourceComplete: managerResult.sourceComplete,
+      sourceStatus: managerResult.overallStatus,
+      statusReason: managerResult.statusReason,
+      queryUsed: params.industry,
+      googleLatencyMs: managerResult.latencies.googleMs,
+      osmLatencyMs: managerResult.latencies.osmMs,
       providerStats: {
-        osm: osmStat,
-        web: webStat,
-        webSearch: webStat,
-        businessProvider: bpStat,
-        directory: dirStat,
+        googlePlaces: gStat,
+        osm: oStat,
+        businessProvider: gStat,
+        web: wStat,
+        webSearch: wStat,
+        directory: dStat,
       },
-      totalDiscovered,
+      totalDiscovered: managerResult.totalDiscovered,
+      cacheHit: false,
     };
 
-    leadPilotDb.setCache(cacheKey, output, 3600000);
+    // Store in query cache (24 hours TTL) if we found businesses
+    if (managerResult.totalDiscovered > 0) {
+      googleDiscoveryCache.setSearchQueryResults(searchKey, output);
+    }
 
     return {
       data: output,
-      sources: activeSources.length > 0 ? activeSources : ['OpenStreetMap Overpass Engine'],
-      warnings,
+      sources: activeSources,
+      warnings: managerResult.providers.googlePlaces.errors,
     };
   }
 }

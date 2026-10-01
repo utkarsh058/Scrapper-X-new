@@ -15,7 +15,10 @@ export interface PipelineExecutionResult {
   summary: SearchSummary;
   totalDiscovered: number;
   totalMatched: number;
+  sourceStatus?: 'COMPLETE' | 'PARTIAL' | 'FAILED';
+  providers?: any;
 }
+
 
 export class PipelineOrchestrator {
   /**
@@ -173,7 +176,10 @@ export class PipelineOrchestrator {
       summary,
       totalDiscovered: discoveredCandidates.length,
       totalMatched: finalLeads.length,
+      sourceStatus: businessDiscovery.getLastSourceStatus(),
+      providers: businessDiscovery.getLastProvidersReport(),
     };
+
   }
 
   private async processSingleBusiness(candidate: DiscoveredBusiness, pipelineRunId: string): Promise<Lead> {

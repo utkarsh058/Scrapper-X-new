@@ -101,7 +101,13 @@ export interface SearchSummary {
   unreachable: number;
 }
 
-export type SearchStatusType = 'COMPLETE' | 'PARTIAL' | 'NO_RESULTS' | 'FAILED';
+export type SearchStatusType =
+  | 'COMPLETE'
+  | 'PARTIAL'
+  | 'NO_RESULTS'
+  | 'FAILED'
+  | 'PROVIDER_NOT_CONFIGURED'
+  | 'PROVIDER_FAILURE';
 
 export interface PipelineStats {
   rawOsmCount: number;
@@ -140,6 +146,7 @@ export interface SearchDiagnostics {
 }
 
 export interface ProviderStats {
+  googlePlaces?: { rawCount: number; status: string; durationMs: number; errors?: string[] };
   osm: { rawCount: number; status: string; durationMs: number; errors?: string[] };
   web: { rawCount: number; status: string; durationMs: number; errors?: string[] };
   webSearch?: { rawCount: number; status: string; durationMs: number; errors?: string[] };

@@ -76,14 +76,16 @@ export interface Job {
   statusReason?: string;
 
   providerStats?: {
-    osm: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
-    web: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
-    webSearch?: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
-    businessProvider?: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
-    directory?: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
+    googlePlaces?: { rawCount: number; status: string; durationMs: number; reason?: string; errors?: string[] };
+    osm: { rawCount: number; status: string; durationMs: number; reason?: string; errors?: string[] };
+    web?: { rawCount: number; status: string; durationMs: number; reason?: string; errors?: string[] };
+    webSearch?: { rawCount: number; status: string; durationMs: number; reason?: string; errors?: string[] };
+    businessProvider?: { rawCount: number; status: string; durationMs: number; reason?: string; errors?: string[] };
+    directory?: { rawCount: number; status: string; durationMs: number; reason?: string; errors?: string[] };
   };
 
   providersReport?: {
+    googlePlaces?: { status: string; discovered: number; errors?: string[] };
     osm: { status: string; discovered: number; errors?: string[] };
     webSearch: { status: string; discovered: number; errors?: string[] };
     businessProvider: { status: string; discovered: number; errors?: string[] };
@@ -108,6 +110,18 @@ export interface Job {
   progressLog: ProgressStep[];
 
   leads: LeadEntity[];
+
+  fastPathLatencyMs?: number;
+  backgroundJobsQueued?: number;
+  latencyMs?: number;
+  rotationStats?: {
+    totalEvaluated: number;
+    deliveredCount: number;
+    neverReturnedCount: number;
+    previouslyReturnedCount: number;
+    previouslyContactedCount: number;
+    excludedDoNotContactCount: number;
+  };
 
   startedAt: string;
   completedAt?: string;

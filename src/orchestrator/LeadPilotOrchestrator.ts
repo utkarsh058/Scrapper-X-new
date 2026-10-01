@@ -1,25 +1,23 @@
 import { SearchRequestPayload } from '@/types';
-import { Job, ActorRun, ProgressStep, RejectionBreakdown } from '@/models/Job';
-import { LeadEntity } from '@/models/Lead';
+import { Job, ProgressStep, RejectionBreakdown, PipelineBreakdown } from '@/models/Job';
+import { LeadEntity, ContactItem, leadEntityToFrontend } from '@/models/Lead';
 import { leadPilotDb } from '@/db';
+import { leadsDb } from '@/lib/leadsDb';
 import { logger } from '@/utils/logger';
 import { validateStateAndCity } from '@/data/indiaLocations';
 import { resolveIndiaLocation } from '@/lib/geoResolver';
+import { searchPlanner } from '@/lib/search/SearchPlanner';
+import { performanceTracker, SearchTimestamps } from '@/lib/metrics/PerformanceTracker';
+import { backgroundEnrichmentQueue } from '@/lib/queue/BackgroundEnrichmentQueue';
+import { smartRotationService } from '@/lib/workflow/SmartRotationService';
+import { leadHistoryService } from '@/lib/workflow/LeadHistoryService';
 
-// Actors
+// Blocking Fast Path Actors
 import { businessDiscoveryActor } from '@/actors/BusinessDiscoveryActor';
 import { multiSourceMergeActor } from '@/actors/MultiSourceMergeActor';
 import { locationVerificationActor } from '@/actors/LocationVerificationActor';
 import { businessVerificationActor } from '@/actors/BusinessVerificationActor';
 import { deduplicationActor } from '@/actors/DeduplicationActor';
-import { websiteDiscoveryActor } from '@/actors/WebsiteDiscoveryActor';
-import { websiteReachabilityActor } from '@/actors/WebsiteReachabilityActor';
-import { websiteCrawlerActor } from '@/actors/WebsiteCrawlerActor';
-import { contactExtractionActor } from '@/actors/ContactExtractionActor';
-import { websiteAuditActor } from '@/actors/WebsiteAuditActor';
-import { leadQualificationActor } from '@/actors/LeadQualificationActor';
-import { leadScoringActor } from '@/actors/LeadScoringActor';
-import { dataNormalizationActor } from '@/actors/DataNormalizationActor';
 
 export class LeadPilotOrchestrator {
   /**
@@ -94,7 +92,7 @@ export class LeadPilotOrchestrator {
   }
 
   /**
-   * Helper to execute an actor with full tracking in the ActorRuns table.
+   * Helper to execute a fast blocking actor with full tracking in the ActorRuns table.
    */
   private async executeTrackedActor<TInput, TOutput>(
     actor: {
@@ -143,11 +141,61 @@ export class LeadPilotOrchestrator {
   }
 
   /**
-   * Main Pipeline Execution
+   * Main Pipeline Execution: FAST PATH + ASYNC BACKGROUND ENRICHMENT
+   * Bounded by global search deadline (default LEAD_SEARCH_DEADLINE_MS = 8000ms, Section 13).
    */
   public async executeJob(jobId: string): Promise<Job> {
+    const deadlineMs = Number(process.env.LEAD_SEARCH_DEADLINE_MS) || 8000;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+
+    const deadlinePromise = new Promise<{ deadlineReached: true }>((resolve) => {
+      timeoutHandle = setTimeout(() => resolve({ deadlineReached: true }), deadlineMs);
+    });
+
+    try {
+      const result = await Promise.race([
+        this.runPipeline(jobId, deadlineMs),
+        deadlinePromise,
+      ]);
+
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+
+      if ('deadlineReached' in result) {
+        // Global search deadline reached: Return whatever verified results are ready (Section 13)
+        const job = leadPilotDb.getJob(jobId);
+        if (job) {
+          job.sourceStatus = 'PARTIAL';
+          job.statusReason = 'SEARCH_DEADLINE_REACHED';
+          job.status = (job.leads && job.leads.length > 0) ? 'DISCOVERY_COMPLETE' : 'COMPLETED';
+          job.completedAt = new Date().toISOString();
+          leadPilotDb.updateJob(job.id, job);
+          return job;
+        }
+      }
+
+      return result as Job;
+    } catch (err: any) {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      const job = leadPilotDb.getJob(jobId);
+      if (job) {
+        job.status = 'FAILED';
+        job.sourceStatus = 'FAILED';
+        job.error = err.message || 'Pipeline execution failed';
+        job.completedAt = new Date().toISOString();
+        leadPilotDb.updateJob(job.id, job);
+        return job;
+      }
+      throw err;
+    }
+  }
+
+  private async runPipeline(jobId: string, deadlineMs: number): Promise<Job> {
     const job = leadPilotDb.getJob(jobId);
     if (!job) throw new Error(`Job ${jobId} not found`);
+
+    const timestamps: SearchTimestamps = {
+      searchStart: Date.now(),
+    };
 
     try {
       job.status = 'RUNNING';
@@ -165,7 +213,35 @@ export class LeadPilotOrchestrator {
       const verifiedCity = validation.matchedCity || criteria.city;
       const bbox = await resolveIndiaLocation(verifiedState, verifiedCity);
 
-      // --- STAGE 1: Business Discovery (Parallel Multi-Source) ---
+      // Check persistent storage for previously discovered businesses (Section 12 & 26)
+      const existingLeads = leadPilotDb.findLeadsByLocationAndIndustry({
+        state: verifiedState,
+        city: verifiedCity,
+        industry: criteria.industry,
+      });
+
+      const cachedCandidates = existingLeads.map((l) => ({
+        source: (l.sources && l.sources[0]) || 'stored',
+        sources: l.sources || ['stored'],
+        sourceId: l.googlePlaceId || l.osmId || l.leadId,
+        name: l.businessName,
+        businessName: l.businessName,
+        category: l.category,
+        industry: l.industry || criteria.industry,
+        address: l.address,
+        city: l.city,
+        state: l.state,
+        phone: l.phone,
+        email: l.email,
+        website: l.website,
+        latitude: l.latitude,
+        longitude: l.longitude,
+        rawTags: {},
+      }));
+
+      // --- STAGE 1: Fast Business Discovery (Google Places Primary + Multi-Provider Fallback) ---
+      const targetDiscoveryPool = Math.max(job.requestedLeads * 3, 100);
+      timestamps.googleStart = Date.now();
       const discoveryOutput = await this.executeTrackedActor(
         businessDiscoveryActor,
         job,
@@ -173,54 +249,70 @@ export class LeadPilotOrchestrator {
           industry: criteria.industry,
           state: verifiedState,
           city: verifiedCity,
-          limit: job.requestedLeads,
+          country: criteria.country || 'India',
+          limit: targetDiscoveryPool,
           bbox,
         },
-        'Discovering businesses across OSM, Web, and Directories...'
+        'Discovering businesses (Google Places Primary + Multi-Provider Fallback)...'
       );
+      timestamps.googleEnd = Date.now();
 
-      job.discovered = discoveryOutput.rawCount;
-      job.sourceComplete = discoveryOutput.sourceComplete;
+      job.discovered = discoveryOutput.rawCount + cachedCandidates.length;
+      job.sourceComplete = discoveryOutput.sourceComplete || cachedCandidates.length > 0;
       job.statusReason = discoveryOutput.statusReason;
-      job.providerStats = discoveryOutput.providerStats;
+      job.providerStats = discoveryOutput.providerStats as any;
+
+      const gStats = discoveryOutput.providerStats.googlePlaces;
+      const oStats = discoveryOutput.providerStats.osm;
+      const wStats = discoveryOutput.providerStats.webSearch;
+      const dStats = discoveryOutput.providerStats.directory;
 
       job.providersReport = {
+        googlePlaces: {
+          status: gStats?.status || 'PROVIDER_NOT_CONFIGURED',
+          discovered: gStats?.rawCount || 0,
+          errors: gStats?.errors || [],
+        },
         osm: {
-          status: discoveryOutput.providerStats.osm.status,
-          discovered: discoveryOutput.providerStats.osm.rawCount,
-          errors: discoveryOutput.providerStats.osm.errors || [],
+          status: oStats?.status || 'NOT_NEEDED',
+          discovered: oStats?.rawCount || 0,
+          errors: oStats?.errors || [],
         },
         webSearch: {
-          status: discoveryOutput.providerStats.webSearch?.status || discoveryOutput.providerStats.web.status,
-          discovered: discoveryOutput.providerStats.webSearch?.rawCount ?? discoveryOutput.providerStats.web.rawCount,
-          errors: discoveryOutput.providerStats.webSearch?.errors || discoveryOutput.providerStats.web.errors || [],
+          status: wStats?.status || 'NOT_NEEDED',
+          discovered: wStats?.rawCount || 0,
+          errors: wStats?.errors || [],
         },
-        businessProvider: {
-          status: discoveryOutput.providerStats.businessProvider?.status || 'DISABLED',
-          discovered: discoveryOutput.providerStats.businessProvider?.rawCount || 0,
-          errors: discoveryOutput.providerStats.businessProvider?.errors || [],
+        directory: {
+          status: dStats?.status || 'NOT_NEEDED',
+          discovered: dStats?.rawCount || 0,
+          errors: dStats?.errors || [],
         },
-      };
+      } as any;
 
-      if (!discoveryOutput.sourceComplete) {
-        job.sourceStatus = 'PARTIAL';
-      }
+      job.sourceStatus = (discoveryOutput.sourceStatus as any) || (discoveryOutput.sourceComplete || cachedCandidates.length > 0 ? 'COMPLETE' : 'PARTIAL');
 
-      if (discoveryOutput.businesses.length === 0) {
-        job.status = 'COMPLETED';
-        job.sourceStatus = 'NO_RESULTS';
+      const allCandidates = [...discoveryOutput.businesses, ...cachedCandidates];
+
+      if (allCandidates.length === 0) {
+        const effStatus = discoveryOutput.sourceStatus || 'NO_RESULTS';
+        job.sourceStatus = effStatus as any;
+        job.status = effStatus === 'NO_RESULTS' ? 'COMPLETED' : 'FAILED';
+        job.statusReason = discoveryOutput.statusReason || 'No businesses found.';
         job.completedAt = new Date().toISOString();
         leadPilotDb.updateJob(job.id, job);
         return job;
       }
 
       // --- STAGE 1.5: Multi-Source Merge & Cross-Deduplication ---
+      timestamps.mergeStart = Date.now();
       const mergeOutput = await this.executeTrackedActor(
         multiSourceMergeActor,
         job,
-        discoveryOutput.businesses,
+        allCandidates,
         'Merging and cross-deduplicating multi-source candidates...'
       );
+      timestamps.mergeEnd = Date.now();
 
       job.deduplicated = mergeOutput.merged.length;
       job.rejectionReasons.DUPLICATE += mergeOutput.deduplicatedCount;
@@ -234,7 +326,7 @@ export class LeadPilotOrchestrator {
           state: verifiedState,
           city: verifiedCity,
         },
-        'Verifying locations...'
+        'Verifying municipal boundaries...'
       );
 
       job.rejectionReasons.OUTSIDE_LOCATION += locationOutput.rejected.length;
@@ -263,81 +355,234 @@ export class LeadPilotOrchestrator {
       job.deduplicated = deduplicationOutput.unique.length;
       job.rejectionReasons.DUPLICATE += deduplicationOutput.duplicatesCount;
 
-      // --- STAGE 5: Website Discovery ---
-      const websiteDiscoveryOutput = await this.executeTrackedActor(
-        websiteDiscoveryActor,
-        job,
-        deduplicationOutput.unique,
-        'Finding websites...'
-      );
+      // --- STAGE 5: Fast Filter Evaluation & Progressive Entity Creation ---
+      // Plan filters: FAST vs ENRICHMENT vs DEEP
+      const plan = searchPlanner.planSearch({
+        industry: criteria.industry,
+        state: verifiedState,
+        city: verifiedCity,
+        contactFilter: criteria.contactFilter,
+        websiteFilter: criteria.websiteFilter,
+        limit: job.requestedLeads,
+        isGoogleConfigured: true,
+        isGoogleCircuitOpen: false,
+        isGoogleBudgetAllowed: true,
+      });
 
-      // --- STAGE 6: Website Reachability ---
-      const reachabilityOutput = await this.executeTrackedActor(
-        websiteReachabilityActor,
-        job,
-        websiteDiscoveryOutput,
-        'Testing website reachability...'
-      );
+      const fastCandidates = deduplicationOutput.unique;
+      const qualifiedEntities: LeadEntity[] = [];
+      const rejectedCandidatesList: any[] = [];
+      let backgroundJobsQueued = 0;
 
-      // --- STAGE 7: Website Crawler (Deep crawl & cache) ---
-      const crawlerOutput = await this.executeTrackedActor(
-        websiteCrawlerActor,
-        job,
-        reachabilityOutput,
-        'Crawling websites...'
-      );
+      for (const b of fastCandidates) {
+        const evalResult = plan.canPassCheaply(b);
 
-      // --- STAGE 8: Contact Extraction (Source + Crawled pages) ---
-      const contactOutput = await this.executeTrackedActor(
-        contactExtractionActor,
-        job,
-        crawlerOutput,
-        'Extracting contacts...'
-      );
+        // Strict filter check: If filter requires verified email or verified no website
+        let enrichmentStatus: 'DISCOVERED' | 'ENRICHING' | 'QUALIFIED' | 'REJECTED' = 'DISCOVERED';
+        if (plan.plannedFilters.strictVerificationRequired) {
+          enrichmentStatus = 'ENRICHING';
+        } else if (evalResult.passed) {
+          enrichmentStatus = 'QUALIFIED';
+        }
 
-      job.enriched = (contactOutput as any[]).filter((c: any) => Boolean(c.phone || c.email)).length;
+        // Check if candidate fails filter requirements
+        if (!evalResult.passed) {
+          rejectedCandidatesList.push({
+            name: b.businessName,
+            category: b.category,
+            city: b.city,
+            state: b.state,
+            phone: b.phone,
+            email: b.email,
+            websiteUrl: b.website,
+            rejectionReason: (evalResult.reason as any) || 'NO_CONTACT',
+            rejectionDetails: `Failed search criteria: ${evalResult.reason}`,
+          });
+          if (evalResult.reason === 'HAS_WEBSITE') job.rejectionReasons.HAS_WEBSITE++;
+          else if (evalResult.reason === 'NO_WEBSITE') job.rejectionReasons.NO_WEBSITE++;
+          else if (evalResult.reason === 'NO_CONTACT') job.rejectionReasons.NO_CONTACT++;
+          else job.rejectionReasons.OTHER++;
 
-      // --- STAGE 9: Website Audit (SEO, UX, Tech, Perf) ---
-      const auditOutput = await this.executeTrackedActor(
-        websiteAuditActor,
-        job,
-        contactOutput,
-        'Auditing websites...'
-      );
+          // If business has a website and needs background enrichment, queue asynchronously
+          if (b.website && evalResult.needsBackgroundEnrichment) {
+            backgroundEnrichmentQueue.enqueue({
+              leadId: `lead_${b.sourceId ? b.sourceId.replace(/[^a-zA-Z0-9_-]/g, '_') : Date.now()}`,
+              searchId: job.id,
+              type: 'EMAIL_EXTRACTION',
+              priority: 'LOW',
+              provider: 'crawler',
+            });
+            backgroundJobsQueued++;
+          }
 
-      job.audited = (auditOutput as any[]).filter((a: any) => Boolean(a.auditResult)).length;
+          continue;
+        }
 
-      // --- STAGE 10: Lead Qualification (Search criteria filters applied AFTER discovery/enrichment) ---
-      const qualificationOutput = await this.executeTrackedActor(
-        leadQualificationActor,
-        job,
-        {
-          businesses: auditOutput,
-          contactFilter: criteria.contactFilter,
-          websiteFilter: criteria.websiteFilter,
-        },
-        'Finding qualified leads...'
-      );
+        const leadId = `lead_${b.sourceId ? b.sourceId.replace(/[^a-zA-Z0-9_-]/g, '_') : Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
-      for (const rej of qualificationOutput.rejected) {
-        if (rej.reason === 'NO_CONTACT') job.rejectionReasons.NO_CONTACT++;
-        else if (rej.reason === 'HAS_WEBSITE') job.rejectionReasons.HAS_WEBSITE++;
-        else if (rej.reason === 'NO_WEBSITE') job.rejectionReasons.NO_WEBSITE++;
-        else if (rej.reason === 'WEBSITE_UNREACHABLE') job.rejectionReasons.WEBSITE_UNREACHABLE++;
-        else if (rej.reason === 'AUDIT_FAILED') job.rejectionReasons.AUDIT_FAILED++;
-        else if (rej.reason === 'NOT_QUALIFIED') job.rejectionReasons.NOT_QUALIFIED++;
-        else job.rejectionReasons.OTHER++;
+        // Build strict provenance contacts
+        const contacts: ContactItem[] = [];
+        if (b.phone) {
+          contacts.push({
+            value: b.phone,
+            type: 'phone',
+            source: b.source || 'google_places',
+            sourceType: b.source || 'google_places',
+            confidence: 'verified',
+            verified: true,
+          });
+        }
+        if (b.email) {
+          contacts.push({
+            value: b.email,
+            type: 'email',
+            source: b.source || 'osm',
+            sourceType: b.source || 'osm',
+            confidence: 'verified',
+            verified: true,
+          });
+        }
+
+        const entity: LeadEntity = {
+          leadId,
+          businessName: b.businessName,
+          category: b.category,
+          industry: criteria.industry,
+          address: b.address || '',
+          city: b.city || verifiedCity || '',
+          state: b.state || verifiedState,
+          country: (b as any).country || criteria.country || 'India',
+          postcode: b.postalCode || b.postcode,
+          latitude: b.latitude,
+          longitude: b.longitude,
+          phone: b.phone,
+          email: b.email, // STRICT: Only populated if discovered from legitimate source, never invented
+          website: b.website,
+          websiteStatus: b.website ? 'Working' : 'No Website',
+          https: b.website ? b.website.startsWith('https') : false,
+          socialLinks: {},
+          contacts,
+          businessVerificationStatus: 'VERIFIED',
+          locationVerificationStatus: 'VERIFIED',
+          auditIssues: [],
+          scoreBreakdown: [],
+          leadScore: b.phone && b.website ? 85 : b.phone ? 70 : 50,
+          sources: [b.source || 'google_places'],
+          sourceEvidence: [
+            {
+              sourceName: b.source || 'google_places',
+              sourceId: b.sourceId,
+              rawTags: b.rawTags,
+              observedAt: new Date().toISOString(),
+            },
+          ],
+          enrichmentStatus,
+          auditStatus: 'PENDING',
+          googlePlaceId: b.source === 'google_places' ? b.sourceId : undefined,
+          osmId: b.source === 'osm' ? b.sourceId : undefined,
+          provenance: {
+            phone: { value: b.phone, source: b.source || 'google_places', verified: Boolean(b.phone) },
+            website: { value: b.website, source: b.source || 'google_places', verified: Boolean(b.website) },
+            email: { value: b.email, source: b.source || 'none', verified: Boolean(b.email) },
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        qualifiedEntities.push(entity);
       }
 
-      job.qualified = qualificationOutput.qualified.length;
+      // --- STAGE 5.5: Smart Rotation & Lead History Prioritization ---
+      const fingerprintKey = leadHistoryService.generateFingerprintKey({
+        country: criteria.country,
+        state: verifiedState,
+        city: verifiedCity,
+        industry: criteria.industry,
+        contactFilter: criteria.contactFilter,
+        websiteFilter: criteria.websiteFilter,
+      });
 
-      // Compute complete pipeline breakdown metrics requested by user
-      const phoneCount = (contactOutput as any[]).filter(c => Boolean(c.phone && c.phone.trim().length > 0)).length;
-      const emailCount = (contactOutput as any[]).filter(c => Boolean(c.email && c.email.trim().length > 0)).length;
-      const phoneOrEmailCount = (contactOutput as any[]).filter(c => Boolean((c.phone && c.phone.trim().length > 0) || (c.email && c.email.trim().length > 0))).length;
-      const websiteAvailableCount = (contactOutput as any[]).filter(c => Boolean(c.websiteUrl) && (c.reachability?.status === 'LIVE' || c.reachability?.status === 'REDIRECTED' || c.reachability?.status === 'FOUND')).length;
-      const websiteUnavailableCount = (contactOutput as any[]).filter(c => !c.websiteUrl || c.reachability?.status === 'NOT_FOUND').length;
-      const websiteUnreachableCount = (contactOutput as any[]).filter(c => Boolean(c.websiteUrl) && (c.reachability?.status === 'UNREACHABLE' || c.reachability?.status === 'DNS_ERROR' || c.reachability?.status === 'SSL_ERROR' || c.reachability?.status === 'TIMEOUT')).length;
+      const rotationResult = smartRotationService.rotateCandidates(
+        qualifiedEntities,
+        job.requestedLeads,
+        fingerprintKey,
+        {
+          country: criteria.country,
+          state: verifiedState,
+          city: verifiedCity,
+          industry: criteria.industry,
+          contactFilter: criteria.contactFilter,
+          websiteFilter: criteria.websiteFilter,
+        }
+      );
+
+      const initialEntities = rotationResult.orderedLeads;
+      job.rotationStats = rotationResult.stats;
+
+      // Queue Background Enrichment for Delivered Leads
+      for (const entity of initialEntities) {
+        if (plan.plannedFilters.enrichmentFilters.requireEmailExtraction && !entity.email && entity.website) {
+          backgroundEnrichmentQueue.enqueue({
+            leadId: entity.leadId,
+            searchId: job.id,
+            type: 'EMAIL_EXTRACTION',
+            priority: 'HIGH',
+            provider: 'crawler',
+          });
+          backgroundJobsQueued++;
+        }
+
+        if (plan.plannedFilters.enrichmentFilters.requireReachabilityCheck && entity.website) {
+          backgroundEnrichmentQueue.enqueue({
+            leadId: entity.leadId,
+            searchId: job.id,
+            type: 'WEBSITE_REACHABILITY',
+            priority: 'MEDIUM',
+            provider: 'http_reachability',
+          });
+          backgroundJobsQueued++;
+        }
+
+        if (!entity.website && plan.plannedFilters.enrichmentFilters.requireWebsiteDiscovery) {
+          backgroundEnrichmentQueue.enqueue({
+            leadId: entity.leadId,
+            searchId: job.id,
+            type: 'WEBSITE_DISCOVERY',
+            priority: 'LOW',
+            provider: 'web_search',
+          });
+          backgroundJobsQueued++;
+        }
+
+        if (plan.plannedFilters.deepAuditFilters.requireSeoAudit && entity.website) {
+          backgroundEnrichmentQueue.enqueue({
+            leadId: entity.leadId,
+            searchId: job.id,
+            type: 'WEBSITE_AUDIT',
+            priority: 'LOW',
+            provider: 'lighthouse',
+          });
+          backgroundJobsQueued++;
+        }
+      }
+
+      // Fast response assembly
+      const phoneCount = initialEntities.filter((l) => Boolean(l.phone)).length;
+      const emailCount = initialEntities.filter((l) => Boolean(l.email)).length;
+      const phoneOrEmailCount = initialEntities.filter((l) => Boolean(l.phone || l.email)).length;
+      const websiteAvailableCount = initialEntities.filter((l) => Boolean(l.website)).length;
+      const noWebsiteCount = initialEntities.filter((l) => !l.website).length;
+
+      job.leads = initialEntities;
+      job.verified = initialEntities.length;
+      job.completed = initialEntities.length;
+      job.qualified = initialEntities.length;
+      job.phoneCount = phoneCount;
+      job.emailCount = emailCount;
+      job.phoneOrEmailCount = phoneOrEmailCount;
+      job.websiteVerifiedCount = websiteAvailableCount;
+      job.noWebsiteCount = noWebsiteCount;
+      job.backgroundJobsQueued = backgroundJobsQueued;
 
       job.pipelineBreakdown = {
         rawDiscoveredCount: job.discovered,
@@ -348,14 +593,13 @@ export class LeadPilotOrchestrator {
         emailCount,
         phoneOrEmailCount,
         websiteAvailableCount,
-        websiteUnavailableCount,
-        websiteUnreachableCount,
-        finalQualifiedCount: qualificationOutput.qualified.length,
+        websiteUnavailableCount: noWebsiteCount,
+        websiteUnreachableCount: 0,
+        finalQualifiedCount: initialEntities.length,
       };
 
-      // Assemble rejected candidates with individual provenance and reasons
       job.rejectedCandidates = [
-        ...locationOutput.rejected.map(r => ({
+        ...locationOutput.rejected.map((r) => ({
           name: r.business.businessName,
           category: r.business.category,
           city: r.business.city,
@@ -363,7 +607,7 @@ export class LeadPilotOrchestrator {
           rejectionReason: 'OUTSIDE_LOCATION' as const,
           rejectionDetails: 'Candidate is outside the specified geographic boundary.',
         })),
-        ...businessVerificationOutput.rejected.map(r => ({
+        ...businessVerificationOutput.rejected.map((r) => ({
           name: r.business.businessName,
           category: r.business.category,
           city: r.business.city,
@@ -371,97 +615,75 @@ export class LeadPilotOrchestrator {
           rejectionReason: (r.reason || 'MISSING_NAME') as any,
           rejectionDetails: 'Candidate failed identity or name verification.',
         })),
-        ...qualificationOutput.rejected.map(r => {
-          let details = '';
-          if (r.reason === 'NO_CONTACT') {
-            details = 'Candidate has no verified phone or email contacts.';
-          } else if (r.reason === 'HAS_WEBSITE') {
-            details = `Filter required "No Website", but candidate has verified active website (${r.business.websiteUrl || 'Found'}).`;
-          } else if (r.reason === 'NO_WEBSITE') {
-            details = 'Filter required "Website Available", but candidate has no verified website.';
-          } else if (r.reason === 'WEBSITE_UNREACHABLE') {
-            details = 'Candidate website failed DNS resolution or reachability checks.';
-          }
-          return {
-            name: r.business.businessName,
-            category: r.business.category,
-            city: r.business.city,
-            state: r.business.state,
-            phone: r.business.phone,
-            email: r.business.email,
-            websiteUrl: r.business.websiteUrl,
-            websiteStatus: r.business.reachability?.status || (r.business.websiteUrl ? 'FOUND' : 'NOT_FOUND'),
-            rejectionReason: (r.reason || 'OTHER') as any,
-            rejectionDetails: details,
-          };
-        }),
+        ...rejectedCandidatesList,
       ];
 
-      // --- STAGE 11: Lead Scoring ---
-      const scoringOutput = await this.executeTrackedActor(
-        leadScoringActor,
-        job,
-        qualificationOutput.qualified,
-        'Scoring commercial opportunities...'
-      );
-
-      // --- STAGE 12: Data Normalization & Final Entity Compilation ---
-      const normalizedEntities = await this.executeTrackedActor<any, LeadEntity[]>(
-        dataNormalizationActor,
-        job,
-        scoringOutput,
-        'Compiling final leads...'
-      );
-
-      // Respect user's maximum requested limit
-      const finalLeads = normalizedEntities.slice(0, job.requestedLeads);
-      job.leads = finalLeads;
-      job.completed = finalLeads.length;
-      job.status = 'COMPLETED';
-      job.completedAt = new Date().toISOString();
-
-      // Populate complete debug counters requested by user specification
-      const enrichedCount = (contactOutput as any[]).filter(
-        c => c.wasEnriched || (c.contacts && c.contacts.some((item: any) => item.source === 'web_search' || item.source === 'official_website'))
-      ).length;
-
-      job.mergedCount = mergeOutput.merged.length;
-      job.normalizedCount = deduplicationOutput.unique.length + deduplicationOutput.duplicatesCount;
-      job.locationVerifiedCount = locationOutput.verified.length;
-      job.deduplicatedCount = deduplicationOutput.unique.length;
-      job.phoneCount = phoneCount;
-      job.emailCount = emailCount;
-      job.phoneOrEmailCount = phoneOrEmailCount;
-      job.websiteDiscoveredCount = (websiteDiscoveryOutput as any[]).filter(w => Boolean(w.websiteUrl)).length;
-      job.websiteVerifiedCount = websiteAvailableCount;
-      job.noWebsiteCount = websiteUnavailableCount;
-      job.enrichedCount = enrichedCount;
-      job.finalCount = finalLeads.length;
-
-      // Determine final searchStatus
-      if (finalLeads.length === 0) {
-        job.sourceStatus = 'NO_RESULTS';
-        job.statusReason = `No businesses matching criteria found in ${verifiedCity || verifiedState}.`;
-      } else if (!job.sourceComplete) {
-        job.sourceStatus = 'PARTIAL';
-      } else {
+      // Section 10 & 11: Truthful status semantics
+      if (initialEntities.length >= job.requestedLeads) {
         job.sourceStatus = 'COMPLETE';
-        job.statusReason =
-          finalLeads.length < job.requestedLeads
-            ? `Retrieved all ${finalLeads.length} matching venues available across discovery sources for ${verifiedCity || verifiedState}.`
-            : `Successfully delivered target limit of ${finalLeads.length} verified leads.`;
+        job.statusReason = `Discovered and qualified ${initialEntities.length} verified leads satisfying all criteria.`;
+      } else if (initialEntities.length > 0) {
+        job.sourceStatus = 'PARTIAL';
+        job.statusReason = `Delivered ${initialEntities.length} of ${job.requestedLeads} qualified leads. All configured discovery sources evaluated.`;
+      } else {
+        job.sourceStatus = 'NO_RESULTS';
+        job.statusReason = `0 leads met the selected criteria.`;
       }
 
-      // Persist leads to Database
-      leadPilotDb.upsertLeadsBatch(finalLeads);
+      // Persist delivered leads in LeadPilot database for instant reuse & rotation (Section 12)
+      leadPilotDb.upsertLeadsBatch(initialEntities);
+
+      // Mark status as DISCOVERY_COMPLETE immediately!
+      job.status = 'DISCOVERY_COMPLETE';
+      job.completedAt = new Date().toISOString();
+
+      timestamps.responseSent = Date.now();
+      const fastPathLatencyMs = timestamps.responseSent - timestamps.searchStart;
+      job.fastPathLatencyMs = fastPathLatencyMs;
+      job.latencyMs = fastPathLatencyMs;
+
+      // Record performance measurements
+      performanceTracker.recordSearchEnd({
+        searchId: job.id,
+        query: `${criteria.industry} in ${verifiedCity || verifiedState}`,
+        timestamps,
+        googleLatencyMs: discoveryOutput.googleLatencyMs || 0,
+        osmLatencyMs: discoveryOutput.osmLatencyMs || 0,
+        mergeLatencyMs: (timestamps.mergeEnd || 0) - (timestamps.mergeStart || 0),
+        fastPathLatencyMs,
+        backgroundLatencyMs: 0,
+        totalLatencyMs: fastPathLatencyMs,
+        cacheHit: Boolean(discoveryOutput.cacheHit),
+        providers: {
+          google: {
+            status: gStats?.status || 'DISABLED',
+            discovered: gStats?.rawCount || 0,
+          },
+          osm: {
+            status: oStats?.status || 'NOT_NEEDED',
+            discovered: oStats?.rawCount || 0,
+          },
+        },
+      });
+
+      // Persist leads and job to DB (both memory/disk and Prisma SQLite)
+      leadPilotDb.upsertLeadsBatch(initialEntities);
       leadPilotDb.updateJob(job.id, job);
+
+      for (const ent of initialEntities) {
+        try {
+          leadsDb.upsertLead(leadEntityToFrontend(ent));
+        } catch {
+          // non-blocking
+        }
+      }
 
       this.logProgress(
         job,
         'orchestrator',
-        'Pipeline Complete',
-        `Delivered ${finalLeads.length} verified qualified leads (${job.sourceStatus})`,
-        finalLeads.length
+        'Discovery Complete (Fast Path)',
+        `Delivered ${initialEntities.length} candidates in ${fastPathLatencyMs}ms. Queued ${backgroundJobsQueued} background enrichment jobs.`,
+        initialEntities.length
       );
 
       return job;

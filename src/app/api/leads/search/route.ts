@@ -5,17 +5,24 @@ import { searchService } from '@/services/SearchService';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const url = new URL(req.url);
-    const isSync = url.searchParams.get('sync') === 'true';
-
-    // If caller explicitly requests actor engine
-    if (url.searchParams.get('engine') === 'actor' || body.engine === 'actor') {
-      const result = await searchService.startSearch(body, isSync);
-      return NextResponse.json(result, {
-        status: result.success === false ? 400 : 200,
-      });
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Malformed JSON payload in request body.',
+          code: 'INVALID_JSON',
+          leads: [],
+        },
+        { status: 400 }
+      );
     }
+
+    const url = new URL(req.url);
+    const isSync = url.searchParams.get('sync') === 'true' || body.sync === true;
+    const requestedEngine = url.searchParams.get('engine') || body.engine;
 
     const {
       country = 'India',
@@ -33,6 +40,7 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           error: 'Restricted to India only. Foreign locations are not permitted.',
+          code: 'INVALID_COUNTRY',
           leads: [],
         },
         { status: 400 }
@@ -44,17 +52,19 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           error: `Invalid Indian State or Union Territory: "${state}". Please select a valid region in India.`,
+          code: 'INVALID_STATE',
           leads: [],
         },
         { status: 400 }
       );
     }
 
-    if (!industry || industry.trim().length === 0) {
+    if (!industry || typeof industry !== 'string' || industry.trim().length === 0) {
       return NextResponse.json(
         {
           success: false,
           error: 'Industry is required.',
+          code: 'MISSING_INDUSTRY',
           leads: [],
         },
         { status: 400 }
@@ -62,36 +72,43 @@ export async function POST(req: NextRequest) {
     }
 
     const requestedLimit = Math.min(Math.max(Number(limit) || 25, 5), 250);
+    const searchPayload = {
+      country: 'India',
+      state,
+      city: city ? String(city).trim() : undefined,
+      industry: industry.trim(),
+      contactFilter,
+      websiteFilter,
+      limit: requestedLimit,
+    };
 
-    try {
-      // 2. Execute Orchestrated Pipeline with Canonical DB Persistence
-      const result = await pipelineOrchestrator.executePipeline({
-        country: 'India',
-        state,
-        city: city || undefined,
-        industry,
-        contactFilter,
-        websiteFilter,
-        limit: requestedLimit,
-      });
-
-      return NextResponse.json({
-        success: true,
-        leads: result.leads,
-        summary: result.summary,
-        totalDiscovered: result.totalDiscovered,
-        totalMatched: result.totalMatched,
-        jobId: result.jobId,
-        pipelineRunId: result.pipelineRunId,
-        attribution: 'LeadPilot Pipeline • Real Verified Data',
-      });
-    } catch (pipelineErr: any) {
-      console.warn('[PipelineOrchestrator Fallback to SearchService]:', pipelineErr.message);
-      const fallbackResult = await searchService.startSearch(body, true);
-      return NextResponse.json(fallbackResult, {
-        status: fallbackResult.success === false ? 400 : 200,
-      });
+    // If caller explicitly requests pipeline orchestrator engine
+    if (requestedEngine === 'pipeline') {
+      try {
+        const result = await pipelineOrchestrator.executePipeline(searchPayload as any);
+        return NextResponse.json({
+          success: true,
+          leads: result.leads,
+          results: result.leads,
+          summary: result.summary,
+          totalDiscovered: result.totalDiscovered,
+          totalMatched: result.totalMatched,
+          jobId: result.jobId,
+          pipelineRunId: result.pipelineRunId,
+          sourceStatus: result.sourceStatus || 'COMPLETE',
+          providers: result.providers,
+          attribution: 'LeadPilot Pipeline • Real Verified Data',
+        });
+      } catch (pipelineErr: any) {
+        console.warn('[PipelineOrchestrator Fallback to SearchService]:', pipelineErr.message);
+      }
     }
+
+    // Default: Dispatch via searchService (supports both asynchronous polling and synchronous execution)
+    const result = await searchService.startSearch(searchPayload as any, isSync);
+    return NextResponse.json(result, {
+      status: result.success === false ? 400 : 200,
+    });
   } catch (error: any) {
     console.error('[Search API Fatal Error]:', error);
     const msg = error.message || 'An error occurred while executing discovery pipeline.';
@@ -101,9 +118,12 @@ export async function POST(req: NextRequest) {
         error: msg.includes('timeout')
           ? 'Discovery service timed out. Please try a narrower city search or check network.'
           : msg,
+        code: 'SEARCH_FAILED',
         leads: [],
+        results: [],
       },
       { status: 500 }
     );
   }
 }
+

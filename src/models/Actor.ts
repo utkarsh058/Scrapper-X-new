@@ -39,6 +39,11 @@ export interface ActorContract<TInput, TOutput> {
   readonly name: string;
   readonly version: string;
   readonly timeoutMs: number;
+  readonly priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  readonly blocking: boolean;
+  readonly dependencies: string[];
+  readonly estimatedCost: number;
+  readonly provider?: string;
   readonly retryPolicy: RetryPolicy;
 
   execute(context: ActorContext<TInput>): Promise<ActorResult<TOutput>>;
@@ -52,6 +57,11 @@ export abstract class BaseActor<TInput, TOutput> implements ActorContract<TInput
   abstract readonly name: string;
   readonly version: string = '1.0.0';
   readonly timeoutMs: number = 30000;
+  readonly priority: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
+  readonly blocking: boolean = false;
+  readonly dependencies: string[] = [];
+  readonly estimatedCost: number = 0;
+  readonly provider?: string;
   readonly retryPolicy: RetryPolicy = {
     maxRetries: 2,
     initialBackoffMs: 500,

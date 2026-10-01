@@ -7,9 +7,9 @@ export class DiagnosticsService {
 
     const actorRuns = leadPilotDb.getActorRunsByJob(jobId);
 
+    const googleRawCount = job.providerStats?.googlePlaces?.rawCount ?? 0;
     const osmRawCount = job.providerStats?.osm?.rawCount ?? 0;
     const webRawCount = job.providerStats?.webSearch?.rawCount ?? job.providerStats?.web?.rawCount ?? 0;
-    const bpRawCount = job.providerStats?.businessProvider?.rawCount ?? 0;
     const directoryRawCount = job.providerStats?.directory?.rawCount ?? 0;
     const totalDiscovered = job.discovered;
     const locationVerifiedCount = Math.max(0, job.discovered - job.rejectionReasons.OUTSIDE_LOCATION);
@@ -19,16 +19,16 @@ export class DiagnosticsService {
     const finalCount = job.completed;
 
     const providerStatuses = {
+      googlePlaces: job.providerStats?.googlePlaces?.status || 'NOT_CONFIGURED',
       osm: job.providerStats?.osm?.status || (osmRawCount > 0 ? 'COMPLETE' : 'NO_RESULTS'),
       web: job.providerStats?.webSearch?.status || job.providerStats?.web?.status || (webRawCount > 0 ? 'COMPLETE' : 'NO_RESULTS'),
-      businessProvider: job.providerStats?.businessProvider?.status || 'DISABLED',
       directory: job.providerStats?.directory?.status || (directoryRawCount > 0 ? 'COMPLETE' : 'NO_RESULTS'),
     };
 
     const providerDurations = {
+      googlePlaces: job.providerStats?.googlePlaces?.durationMs ?? 0,
       osm: job.providerStats?.osm?.durationMs ?? 0,
       web: job.providerStats?.webSearch?.durationMs ?? job.providerStats?.web?.durationMs ?? 0,
-      businessProvider: job.providerStats?.businessProvider?.durationMs ?? 0,
       directory: job.providerStats?.directory?.durationMs ?? 0,
     };
 
@@ -41,6 +41,7 @@ export class DiagnosticsService {
       statusReason: job.statusReason,
 
       // Multi-Source Diagnostics
+      googleRawCount,
       osmRawCount,
       webRawCount,
       directoryRawCount,
@@ -52,6 +53,11 @@ export class DiagnosticsService {
       finalCount,
 
       providers: job.providersReport || {
+        googlePlaces: {
+          status: job.providerStats?.googlePlaces?.status || 'NOT_CONFIGURED',
+          discovered: googleRawCount,
+          errors: job.providerStats?.googlePlaces?.errors || [],
+        },
         osm: {
           status: job.providerStats?.osm?.status || 'COMPLETE',
           discovered: job.providerStats?.osm?.rawCount || totalDiscovered,
@@ -62,10 +68,10 @@ export class DiagnosticsService {
           discovered: job.providerStats?.webSearch?.rawCount ?? job.providerStats?.web?.rawCount ?? 0,
           errors: job.providerStats?.webSearch?.errors || job.providerStats?.web?.errors || [],
         },
-        businessProvider: {
-          status: job.providerStats?.businessProvider?.status || 'DISABLED',
-          discovered: job.providerStats?.businessProvider?.rawCount || 0,
-          errors: job.providerStats?.businessProvider?.errors || [],
+        directory: {
+          status: job.providerStats?.directory?.status || 'NOT_NEEDED',
+          discovered: directoryRawCount,
+          errors: job.providerStats?.directory?.errors || [],
         },
       },
       mergedCount: job.mergedCount ?? deduplicatedCount,

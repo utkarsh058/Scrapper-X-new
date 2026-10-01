@@ -2,9 +2,10 @@ import { SearchRequestPayload, SearchSummary } from '@/types';
 import { jobManager } from '@/jobs/JobManager';
 import { leadEntityToFrontend } from '@/models/Lead';
 import { Job } from '@/models/Job';
+import { leadPilotDb } from '@/db';
 
 export class SearchService {
-  public async startSearch(criteria: SearchRequestPayload, sync: boolean = false) {
+  public async startSearch(criteria: SearchRequestPayload, sync: boolean = true) {
     if (sync) {
       const job = await jobManager.executeJobSync(criteria);
       return this.formatJobResponse(job);
@@ -40,7 +41,9 @@ export class SearchService {
   }
 
   private formatJobResponse(job: Job) {
-    const frontendLeads = (job.leads || []).map(leadEntityToFrontend);
+    // Read up-to-date entities from persistent database so background enrichment immediately reflects
+    const freshLeads = (job.leads || []).map((l) => leadPilotDb.getLead(l.leadId) || l);
+    const frontendLeads = freshLeads.map(leadEntityToFrontend);
 
     const summary: SearchSummary = {
       total: frontendLeads.length,
@@ -58,20 +61,26 @@ export class SearchService {
 
     return {
       success: job.status !== 'FAILED',
+      searchId: job.id,
       jobId: job.id,
       status: job.status,
       searchStatus: job.sourceStatus,
       sourceComplete: job.sourceComplete,
       statusReason: job.statusReason,
+      latencyMs: job.latencyMs || job.fastPathLatencyMs || 0,
+      fastPathLatencyMs: job.fastPathLatencyMs || 0,
+      backgroundJobsQueued: job.backgroundJobsQueued || 0,
       leads: frontendLeads,
+      results: frontendLeads,
       summary,
       providerStats: job.providerStats || {
+        googlePlaces: { rawCount: 0, status: 'PROVIDER_NOT_CONFIGURED', durationMs: 0 },
         osm: { rawCount: job.discovered, status: 'COMPLETE', durationMs: 0 },
-        web: { rawCount: 0, status: 'COMPLETE', durationMs: 0 },
-        directory: { rawCount: 0, status: 'COMPLETE', durationMs: 0 },
+        web: { rawCount: 0, status: 'NOT_NEEDED', durationMs: 0 },
+        directory: { rawCount: 0, status: 'NOT_NEEDED', durationMs: 0 },
       },
       pipelineStats: {
-        rawOsmCount: job.discovered,
+        rawOsmCount: job.providerStats?.osm?.rawCount ?? job.discovered,
         namedCount: job.discovered - job.rejectionReasons.MISSING_NAME,
         inCityBoundsCount: job.discovered - job.rejectionReasons.OUTSIDE_LOCATION,
         deduplicatedCount: job.deduplicated,
@@ -91,23 +100,30 @@ export class SearchService {
         websiteFilterExcluded: job.rejectionReasons.NO_WEBSITE + job.rejectionReasons.HAS_WEBSITE,
       },
       rejectionReasons: job.rejectionReasons,
-      providers: job.providersReport || {
+      providers: {
+        googlePlaces: {
+          status: job.providerStats?.googlePlaces?.status || (process.env.GOOGLE_PLACES_API_KEY ? 'SUCCESS' : 'PROVIDER_NOT_CONFIGURED'),
+          discovered: job.providerStats?.googlePlaces?.rawCount ?? 0,
+          errors: job.providerStats?.googlePlaces?.errors || [],
+        },
         osm: {
-          status: job.providerStats?.osm?.status || 'COMPLETE',
-          discovered: job.providerStats?.osm?.rawCount || job.discovered,
+          status: job.providerStats?.osm?.status || 'NOT_NEEDED',
+          discovered: job.providerStats?.osm?.rawCount || 0,
           errors: job.providerStats?.osm?.errors || [],
         },
         webSearch: {
-          status: job.providerStats?.webSearch?.status || job.providerStats?.web?.status || 'COMPLETE',
-          discovered: job.providerStats?.webSearch?.rawCount ?? job.providerStats?.web?.rawCount ?? 0,
-          errors: job.providerStats?.webSearch?.errors || job.providerStats?.web?.errors || [],
+          status: job.providerStats?.webSearch?.status || 'NOT_NEEDED',
+          discovered: job.providerStats?.webSearch?.rawCount ?? 0,
+          errors: job.providerStats?.webSearch?.errors || [],
         },
-        businessProvider: {
-          status: job.providerStats?.businessProvider?.status || 'DISABLED',
-          discovered: job.providerStats?.businessProvider?.rawCount || 0,
-          errors: job.providerStats?.businessProvider?.errors || [],
+        directory: {
+          status: job.providerStats?.directory?.status || 'NOT_NEEDED',
+          discovered: job.providerStats?.directory?.rawCount ?? 0,
+          errors: job.providerStats?.directory?.errors || [],
         },
+        ...(job.providersReport || {}),
       },
+
       mergedCount: job.mergedCount ?? job.deduplicated,
       normalizedCount: job.normalizedCount ?? job.discovered,
       locationVerifiedCount: job.locationVerifiedCount ?? (job.discovered - job.rejectionReasons.OUTSIDE_LOCATION),
@@ -120,6 +136,7 @@ export class SearchService {
       noWebsiteCount: job.noWebsiteCount ?? summary.noWebsite,
       enrichedCount: job.enrichedCount ?? job.enriched,
       finalCount: job.finalCount ?? frontendLeads.length,
+      rotationStats: job.rotationStats,
       pipelineBreakdown: job.pipelineBreakdown || {
         rawDiscoveredCount: job.discovered,
         normalizedCount: job.discovered - (job.rejectionReasons.MISSING_NAME + job.rejectionReasons.INVALID_CATEGORY),

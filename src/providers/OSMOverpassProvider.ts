@@ -6,6 +6,9 @@ import {
 } from './BusinessDiscoveryProvider';
 import { queryOverpassBusinesses } from '@/lib/overpassClient';
 import { resolveIndiaLocation } from '@/lib/geoResolver';
+import { osmCircuitBreaker } from '@/lib/resilience/CircuitBreaker';
+import { semaphores, getTimeoutConfig } from '@/lib/config/concurrencyConfig';
+import { performanceTracker } from '@/lib/metrics/PerformanceTracker';
 
 export class OSMOverpassProvider implements BusinessDiscoveryProvider {
   readonly providerId = 'osm';
@@ -13,63 +16,121 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
 
   public async discoverBusinesses(params: SearchDiscoveryParams): Promise<DiscoveryResult> {
     const startTime = Date.now();
+    const resolvedAreaName = params.city ? `${params.city}, ${params.state}` : params.state;
+    const timeouts = getTimeoutConfig();
 
-    // Resolve bounding box if not provided
-    let bbox: any = params.bbox;
-    if (!bbox) {
-      bbox = await resolveIndiaLocation(params.state, params.city);
+    // 0. Configuration check
+    if (process.env.OSM_ENABLED === 'false') {
+      return {
+        providerId: this.providerId,
+        providerName: this.name,
+        resolvedAreaName,
+        rawCount: 0,
+        businesses: [],
+        sourceComplete: false,
+        status: 'PROVIDER_NOT_CONFIGURED',
+        statusReason: 'OpenStreetMap discovery is disabled via OSM_ENABLED=false.',
+        errors: ['OSM_DISABLED'],
+        durationMs: 0,
+      };
     }
 
-    const discovery = await queryOverpassBusinesses({
-      industry: params.industry,
-      state: params.state,
-      city: params.city,
-      bbox: bbox as any,
-      limit: Math.max(params.limit || 50, 25),
-    });
+    // 1. Acquire concurrency semaphore
+    const releaseSemaphore = await semaphores.osm.acquire();
 
-    const businesses: RawDiscoveredBusiness[] = discovery.leads.map((lead: any) => {
-      const name = lead.businessName || lead.name || '';
-      const postalCode = lead.postcode || lead.location?.postcode;
+    try {
+      // 2. Resolve bounding box if not provided
+      let bbox: any = params.bbox;
+      if (!bbox) {
+        bbox = await resolveIndiaLocation(params.state, params.city);
+      }
+
+      // 3. Circuit breaker + strict timeout
+      const effectiveTimeout = Math.max(timeouts.osmFastMs || 2000, 3000);
+      const discovery = await osmCircuitBreaker.execute(async () => {
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => {
+            performanceTracker.recordTimeout();
+            reject(new Error(`OSM Overpass fast-path query timed out after ${effectiveTimeout}ms`));
+          }, effectiveTimeout)
+        );
+
+        const queryPromise = queryOverpassBusinesses({
+          industry: params.industry,
+          state: params.state,
+          city: params.city,
+          bbox: bbox as any,
+          limit: Math.max(params.limit || 50, 25),
+        });
+
+        return await Promise.race([queryPromise, timeoutPromise]);
+      });
+
+      const businesses: RawDiscoveredBusiness[] = (discovery?.leads || []).map((lead: any) => {
+        const name = lead.businessName || lead.name || '';
+        const postalCode = lead.postcode || lead.location?.postcode;
+        return {
+          source: 'osm',
+          sources: ['osm'],
+          sourceId: String(lead.osmId || lead.id),
+          osmType: lead.osmType,
+          osmId: lead.osmId ? Number(lead.osmId) : undefined,
+          categoryTag: lead.categoryTag || lead.category,
+          name,
+          businessName: name,
+          category: lead.category,
+          address: lead.address || lead.location?.address || `${params.city || ''} ${params.state}`.trim(),
+          city: lead.city || lead.location?.city || params.city,
+          state: lead.state || lead.location?.state || params.state,
+          postalCode,
+          postcode: postalCode,
+          latitude: lead.latitude || lead.coordinates?.lat,
+          longitude: lead.longitude || lead.coordinates?.lon,
+          phone: lead.phone && lead.phone !== 'Not available' ? lead.phone : undefined,
+          email: lead.email && lead.email !== 'Not available' ? lead.email : undefined,
+          website: lead.websiteUrl || (typeof lead.website === 'string' ? lead.website : lead.website?.url),
+          openingHours: lead.openingHours,
+          sourceUrl: lead.sourceUrl || (lead.osmType && lead.osmId ? `https://www.openstreetmap.org/${lead.osmType}/${lead.osmId}` : undefined),
+          rawTags: lead.rawTags || {},
+        };
+      });
+
+      const durationMs = Date.now() - startTime;
+      const rawCount = businesses.length;
+
       return {
-        source: 'osm',
-        sources: ['osm'],
-        sourceId: String(lead.osmId || lead.id),
-        osmType: lead.osmType,
-        osmId: lead.osmId ? Number(lead.osmId) : undefined,
-        categoryTag: lead.categoryTag || lead.category,
-        name,
-        businessName: name,
-        category: lead.category,
-        address: lead.address || lead.location?.address || `${params.city || ''} ${params.state}`.trim(),
-        city: lead.city || lead.location?.city || params.city,
-        state: lead.state || lead.location?.state || params.state,
-        postalCode,
-        postcode: postalCode,
-        latitude: lead.latitude || lead.coordinates?.lat,
-        longitude: lead.longitude || lead.coordinates?.lon,
-        phone: lead.phone && lead.phone !== 'Not available' ? lead.phone : undefined,
-        email: lead.email && lead.email !== 'Not available' ? lead.email : undefined,
-        website: lead.websiteUrl || (typeof lead.website === 'string' ? lead.website : lead.website?.url),
-        openingHours: lead.openingHours,
-        sourceUrl: lead.sourceUrl || (lead.osmType && lead.osmId ? `https://www.openstreetmap.org/${lead.osmType}/${lead.osmId}` : undefined),
-        rawTags: lead.rawTags || {},
+        providerId: this.providerId,
+        providerName: this.name,
+        resolvedAreaName: discovery.resolvedAreaName || resolvedAreaName,
+        rawCount,
+        businesses,
+        sourceComplete: rawCount > 0,
+        status: rawCount > 0 ? 'COMPLETE' : 'NO_RESULTS',
+        statusReason:
+          rawCount > 0
+            ? `Discovered ${rawCount} real candidates from OpenStreetMap.`
+            : `OpenStreetMap found zero business records for ${params.industry} in ${resolvedAreaName}.`,
+        queryUsed: discovery.queryUsed,
+        endpointUsed: discovery.endpointUsed,
+        durationMs,
       };
-    });
-
-    return {
-      providerId: this.providerId,
-      providerName: this.name,
-      resolvedAreaName: discovery.resolvedAreaName,
-      rawCount: discovery.rawOsmCount,
-      businesses,
-      sourceComplete: discovery.sourceComplete,
-      status: discovery.sourceComplete ? 'COMPLETE' : (discovery.rawOsmCount > 0 ? 'PARTIAL' : 'NO_RESULTS'),
-      statusReason: discovery.statusReason,
-      queryUsed: discovery.queryUsed,
-      endpointUsed: discovery.endpointUsed,
-      durationMs: Date.now() - startTime,
-    };
+    } catch (err: any) {
+      console.warn(`[OSMOverpassProvider] OSM query failed or timed out: ${err.message}`);
+      return {
+        providerId: this.providerId,
+        providerName: this.name,
+        resolvedAreaName,
+        rawCount: 0,
+        businesses: [],
+        sourceComplete: false,
+        status: 'PROVIDER_FAILURE',
+        statusReason: `OSM query failed: ${err.message}`,
+        errors: [err.message],
+        durationMs: Date.now() - startTime,
+      };
+    } finally {
+      releaseSemaphore();
+    }
   }
 }
 
