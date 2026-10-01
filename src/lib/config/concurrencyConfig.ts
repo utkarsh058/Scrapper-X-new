@@ -33,9 +33,11 @@ export function getConcurrencyLimits(): ConcurrencyLimits {
 
 export function getTimeoutConfig(): TimeoutConfig {
   return {
-    googlePlacesFastMs: parseInt(process.env.GOOGLE_PLACES_TIMEOUT_MS || '2000', 10),
-    osmFastMs: parseInt(process.env.OSM_TIMEOUT_MS || '2000', 10),
-    websiteLightweightMs: parseInt(process.env.WEBSITE_FETCH_TIMEOUT_MS || '2000', 10),
+    // Google Places needs 8s minimum from Vercel — individual page fetches average 500-1500ms
+    // with retries. 2000ms caused SEARCH_DEADLINE_REACHED with 0 results.
+    googlePlacesFastMs: parseInt(process.env.GOOGLE_PLACES_TIMEOUT_MS || '8000', 10),
+    osmFastMs: parseInt(process.env.OSM_TIMEOUT_MS || '6000', 10),
+    websiteLightweightMs: parseInt(process.env.WEBSITE_FETCH_TIMEOUT_MS || '3000', 10),
     crawlerMs: parseInt(process.env.CRAWLER_TIMEOUT_MS || '8000', 10),
     backgroundAuditMs: parseInt(process.env.AUDIT_TIMEOUT_MS || '30000', 10),
   };
@@ -81,13 +83,14 @@ export class AsyncSemaphore {
   }
 }
 
-// Global provider semaphores
-const limits = getConcurrencyLimits();
+// Global provider semaphores — initialized once with env-var limits.
+// getConcurrencyLimits() reads process.env at call time, so the values
+// are correct as long as this module loads after the runtime env is available.
 export const semaphores = {
-  googlePlaces: new AsyncSemaphore(limits.googlePlaces),
-  osm: new AsyncSemaphore(limits.osm),
-  websiteFetch: new AsyncSemaphore(limits.websiteFetch),
-  crawler: new AsyncSemaphore(limits.crawler),
-  pagespeed: new AsyncSemaphore(limits.pagespeed),
-  webSearch: new AsyncSemaphore(limits.webSearch),
+  googlePlaces: new AsyncSemaphore(parseInt(process.env.GOOGLE_PLACES_CONCURRENCY || '3', 10)),
+  osm: new AsyncSemaphore(parseInt(process.env.OSM_CONCURRENCY || '2', 10)),
+  websiteFetch: new AsyncSemaphore(parseInt(process.env.WEBSITE_FETCH_CONCURRENCY || '5', 10)),
+  crawler: new AsyncSemaphore(parseInt(process.env.CRAWLER_CONCURRENCY || '2', 10)),
+  pagespeed: new AsyncSemaphore(parseInt(process.env.PAGESPEED_CONCURRENCY || '2', 10)),
+  webSearch: new AsyncSemaphore(parseInt(process.env.WEB_SEARCH_CONCURRENCY || '2', 10)),
 };

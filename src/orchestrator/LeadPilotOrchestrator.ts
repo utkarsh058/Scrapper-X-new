@@ -145,7 +145,7 @@ export class LeadPilotOrchestrator {
    * Bounded by global search deadline (default LEAD_SEARCH_DEADLINE_MS = 8000ms, Section 13).
    */
   public async executeJob(jobId: string): Promise<Job> {
-    const deadlineMs = Number(process.env.LEAD_SEARCH_DEADLINE_MS) || 8000;
+    const deadlineMs = Number(process.env.LEAD_SEARCH_DEADLINE_MS) || 25000;
     let timeoutHandle: NodeJS.Timeout | undefined;
 
     const deadlinePromise = new Promise<{ deadlineReached: true }>((resolve) => {

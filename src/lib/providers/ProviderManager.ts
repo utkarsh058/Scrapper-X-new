@@ -4,6 +4,7 @@ import { osmOverpassProvider } from '@/providers/OSMOverpassProvider';
 import { webSearchDiscoveryProvider } from '@/providers/WebSearchDiscoveryProvider';
 import { directoryDiscoveryProvider } from '@/providers/DirectoryDiscoveryProvider';
 import { providerHealthService, SystemProvidersHealth } from './ProviderHealthService';
+import { getTimeoutConfig } from '@/lib/config/concurrencyConfig';
 import { leadPilotDb } from '@/db';
 import { normalizePhone } from '@/utils/phoneUtils';
 import { extractDomain } from '@/utils/urlUtils';
@@ -120,11 +121,15 @@ export class ProviderManager {
     if (isGoogleConfigured && health.googlePlaces.healthy) {
       onProgress?.('Executing Google Places API (New) as Primary discovery provider...');
       const gStart = Date.now();
+      const timeouts = getTimeoutConfig();
+      // Allow Google Places enough time for up to 3 pages of results from Vercel's servers.
+      // googlePlacesFastMs default is now 8000ms per page; outer timeout must be higher.
+      const googleTimeoutMs = Math.max((timeouts.googlePlacesFastMs || 8000) * 2, 20000);
 
       try {
         const googleRes = await withTimeout(
           googlePlacesDiscoveryProvider.discoverBusinesses({ ...params, limit: targetPool }),
-          10000,
+          googleTimeoutMs,
           'Google Places API'
         );
         result.latencies.googleMs = Date.now() - gStart;
@@ -182,11 +187,13 @@ export class ProviderManager {
     if (isOsmEnabled) {
       onProgress?.('Executing OpenStreetMap Overpass as Secondary / Fallback discovery source...');
       const oStart = Date.now();
+      const osmTimeouts = getTimeoutConfig();
+      const osmTimeoutMs = Math.max(osmTimeouts.osmFastMs || 6000, 10000);
 
       try {
         const osmRes = await withTimeout(
           osmOverpassProvider.discoverBusinesses({ ...params, limit: targetPool }),
-          10000,
+          osmTimeoutMs,
           'OpenStreetMap Overpass'
         );
         result.latencies.osmMs = Date.now() - oStart;
