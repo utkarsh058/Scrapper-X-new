@@ -32,6 +32,7 @@ export interface RawDiscoveredBusiness {
   osmType?: 'node' | 'way' | 'relation';
   osmId?: number;
   categoryTag?: string;
+  types?: string[];
   rawTags: Record<string, any>;
   sourceEvidence?: {
     source: string;
@@ -49,6 +50,7 @@ export interface DiscoveryResult {
   businesses: RawDiscoveredBusiness[];
   sourceComplete: boolean;
   status:
+    | 'SUCCESS'
     | 'COMPLETE'
     | 'PARTIAL'
     | 'FAILED'
@@ -58,6 +60,7 @@ export interface DiscoveryResult {
     | 'PROVIDER_FAILURE';
   statusReason?: string;
   errors?: string[];
+  pagesRequested?: number;
   queryUsed?: string;
   endpointUsed?: string;
   durationMs: number;

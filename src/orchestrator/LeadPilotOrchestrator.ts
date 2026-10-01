@@ -269,12 +269,13 @@ export class LeadPilotOrchestrator {
 
       job.providersReport = {
         googlePlaces: {
-          status: gStats?.status || 'PROVIDER_NOT_CONFIGURED',
+          status: gStats?.status || 'DISABLED',
           discovered: gStats?.rawCount || 0,
+          pagesRequested: gStats?.pagesRequested || (gStats && gStats.rawCount > 0 ? 1 : 0),
           errors: gStats?.errors || [],
         },
         osm: {
-          status: oStats?.status || 'NOT_NEEDED',
+          status: oStats?.status || 'NO_RESULTS',
           discovered: oStats?.rawCount || 0,
           errors: oStats?.errors || [],
         },
@@ -314,6 +315,7 @@ export class LeadPilotOrchestrator {
       );
       timestamps.mergeEnd = Date.now();
 
+      job.mergedCount = mergeOutput.merged.length;
       job.deduplicated = mergeOutput.merged.length;
       job.rejectionReasons.DUPLICATE += mergeOutput.deduplicatedCount;
 
@@ -329,6 +331,7 @@ export class LeadPilotOrchestrator {
         'Verifying municipal boundaries...'
       );
 
+      job.locationVerifiedCount = locationOutput.verified.length;
       job.rejectionReasons.OUTSIDE_LOCATION += locationOutput.rejected.length;
 
       // --- STAGE 3: Business Verification ---
@@ -353,6 +356,7 @@ export class LeadPilotOrchestrator {
       );
 
       job.deduplicated = deduplicationOutput.unique.length;
+      job.deduplicatedCount = deduplicationOutput.unique.length;
       job.rejectionReasons.DUPLICATE += deduplicationOutput.duplicatesCount;
 
       // --- STAGE 5: Fast Filter Evaluation & Progressive Entity Creation ---
@@ -398,6 +402,7 @@ export class LeadPilotOrchestrator {
             rejectionReason: (evalResult.reason as any) || 'NO_CONTACT',
             rejectionDetails: `Failed search criteria: ${evalResult.reason}`,
           });
+
           if (evalResult.reason === 'HAS_WEBSITE') job.rejectionReasons.HAS_WEBSITE++;
           else if (evalResult.reason === 'NO_WEBSITE') job.rejectionReasons.NO_WEBSITE++;
           else if (evalResult.reason === 'NO_CONTACT') job.rejectionReasons.NO_CONTACT++;
@@ -436,12 +441,41 @@ export class LeadPilotOrchestrator {
           contacts.push({
             value: b.email,
             type: 'email',
-            source: b.source || 'osm',
-            sourceType: b.source || 'osm',
+            source: b.source || 'openstreetmap',
+            sourceType: b.source || 'openstreetmap',
             confidence: 'verified',
             verified: true,
           });
         }
+
+        const resolvedSources = b.sources && b.sources.length > 0 ? b.sources : [b.source || 'google_places'];
+        const resolvedEvidence =
+          b.sourceEvidence && b.sourceEvidence.length > 0
+            ? b.sourceEvidence.map((ev: any) => ({
+                sourceName: ev.source || ev.sourceName || 'google_places',
+                sourceId: ev.sourceId,
+                rawTags: ev.rawTags,
+                observedAt: new Date().toISOString(),
+              }))
+            : [
+                {
+                  sourceName: b.source || 'google_places',
+                  sourceId: b.sourceId,
+                  rawTags: b.rawTags,
+                  observedAt: new Date().toISOString(),
+                },
+              ];
+
+        const googlePlaceId =
+          b.rawTags?.googlePlaceId ||
+          (b.source === 'google_places' ? b.sourceId : undefined) ||
+          b.sourceEvidence?.find((e: any) => e.source === 'google_places' || e.sourceName === 'google_places')?.sourceId;
+
+        const osmId =
+          b.rawTags?.osmId
+            ? String(b.rawTags.osmId)
+            : (b.source === 'osm' || b.source === 'openstreetmap' ? b.sourceId : undefined) ||
+              b.sourceEvidence?.find((e: any) => e.source === 'osm' || e.source === 'openstreetmap' || e.sourceName === 'openstreetmap')?.sourceId;
 
         const entity: LeadEntity = {
           leadId,
@@ -467,23 +501,16 @@ export class LeadPilotOrchestrator {
           auditIssues: [],
           scoreBreakdown: [],
           leadScore: b.phone && b.website ? 85 : b.phone ? 70 : 50,
-          sources: [b.source || 'google_places'],
-          sourceEvidence: [
-            {
-              sourceName: b.source || 'google_places',
-              sourceId: b.sourceId,
-              rawTags: b.rawTags,
-              observedAt: new Date().toISOString(),
-            },
-          ],
+          sources: resolvedSources,
+          sourceEvidence: resolvedEvidence,
           enrichmentStatus,
           auditStatus: 'PENDING',
-          googlePlaceId: b.source === 'google_places' ? b.sourceId : undefined,
-          osmId: b.source === 'osm' ? b.sourceId : undefined,
+          googlePlaceId,
+          osmId,
           provenance: {
-            phone: { value: b.phone, source: b.source || 'google_places', verified: Boolean(b.phone) },
-            website: { value: b.website, source: b.source || 'google_places', verified: Boolean(b.website) },
-            email: { value: b.email, source: b.source || 'none', verified: Boolean(b.email) },
+            phone: { value: b.phone, source: resolvedSources.join(', '), verified: Boolean(b.phone) },
+            website: { value: b.website, source: resolvedSources.join(', '), verified: Boolean(b.website) },
+            email: { value: b.email, source: b.email ? (resolvedSources.find((s: string) => s === 'openstreetmap' || s === 'osm') || 'web_search') : 'none', verified: Boolean(b.email) },
           },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),

@@ -1,5 +1,6 @@
 import { Lead, StructuredWebsiteAudit, SearchSummary, SearchRequestPayload } from '@/types';
 import { prisma } from './prisma';
+import { extractDomain } from '@/utils/urlUtils';
 
 export interface StoredLeadRecord {
   id: string;
@@ -110,6 +111,117 @@ class LeadsDatabase {
           opportunityScore: lead.leadScore || 0,
         },
       });
+
+      // Persist source provenance records in PostgreSQL
+      const anyLead = lead as any;
+      const sourcesToPersist: { provider: string; sourceId: string; sourceUrl?: string }[] = [];
+      const gPlaceId = anyLead.googlePlaceId || anyLead.rawLead?.googlePlaceId || (lead.source === 'google_places' ? lead.sourceId : undefined);
+      const oId = anyLead.osmId ? String(anyLead.osmId) : anyLead.rawLead?.osmId ? String(anyLead.rawLead.osmId) : (lead.source === 'openstreetmap' || lead.source === 'osm' ? lead.sourceId : undefined);
+
+      if (gPlaceId) {
+        sourcesToPersist.push({
+          provider: 'google_places',
+          sourceId: gPlaceId,
+          sourceUrl: `https://www.google.com/maps/place/?q=place_id:${gPlaceId}`,
+        });
+      }
+      if (oId) {
+        sourcesToPersist.push({
+          provider: 'openstreetmap',
+          sourceId: oId,
+          sourceUrl: `https://www.openstreetmap.org/node/${oId}`,
+        });
+      }
+      if (anyLead.sourceEvidence) {
+        for (const ev of anyLead.sourceEvidence) {
+          const prov = ev.source === 'osm' ? 'openstreetmap' : ev.source || 'google_places';
+          if (!sourcesToPersist.some((s) => s.provider === prov && s.sourceId === ev.sourceId)) {
+            sourcesToPersist.push({
+              provider: prov,
+              sourceId: ev.sourceId,
+              sourceUrl: ev.sourceUrl,
+            });
+          }
+        }
+      }
+      if (sourcesToPersist.length === 0 && lead.source) {
+        const prov = lead.source === 'osm' ? 'openstreetmap' : lead.source;
+        sourcesToPersist.push({
+          provider: prov,
+          sourceId: lead.sourceId || lead.id,
+        });
+      }
+
+      for (const sp of sourcesToPersist) {
+        try {
+          const existingSource = await prisma.businessSource.findFirst({
+            where: { businessId: dbBusiness.id, provider: sp.provider, sourceId: sp.sourceId },
+          });
+          if (!existingSource) {
+            await prisma.businessSource.create({
+              data: {
+                businessId: dbBusiness.id,
+                provider: sp.provider,
+                sourceId: sp.sourceId,
+                sourceUrl: sp.sourceUrl,
+                rawPayload: JSON.stringify({
+                  googlePlaceId: gPlaceId,
+                  osmId: oId,
+                  provenance: anyLead.provenance || anyLead.rawLead?.provenance,
+                }),
+              },
+            });
+          }
+        } catch {
+          // ignore duplicate source insertion
+        }
+      }
+
+      // Persist Contact relation
+      const contactPhone = lead.phone || lead.contact?.phone;
+      const contactEmail = lead.email || lead.contact?.email;
+      if (contactPhone || contactEmail) {
+        try {
+          const existingContact = await prisma.contact.findFirst({
+            where: { businessId: dbBusiness.id },
+          });
+          if (!existingContact) {
+            await prisma.contact.create({
+              data: {
+                businessId: dbBusiness.id,
+                phone: contactPhone,
+                email: contactEmail,
+                verificationStatus: 'VERIFIED',
+              },
+            });
+          }
+        } catch {
+          // non-blocking
+        }
+      }
+
+      // Persist Website relation
+      const webUrl = lead.websiteUrl || lead.website?.url;
+      if (webUrl) {
+        try {
+          const existingWebsite = await prisma.website.findFirst({
+            where: { businessId: dbBusiness.id },
+          });
+          if (!existingWebsite) {
+            await prisma.website.create({
+              data: {
+                businessId: dbBusiness.id,
+                url: webUrl,
+                domain: extractDomain(webUrl) || webUrl,
+                isHttps: webUrl.startsWith('https'),
+                status: lead.websiteStatus || lead.website?.status || 'Working',
+              },
+            });
+          }
+        } catch {
+          // non-blocking
+        }
+      }
 
       const record: StoredLeadRecord = {
         id: dbBusiness.id,

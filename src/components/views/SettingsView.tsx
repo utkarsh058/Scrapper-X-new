@@ -249,8 +249,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
                   <input
                     type="password"
                     placeholder="AIzaSy... (Configured via GOOGLE_PLACES_API_KEY in .env)"
-                    defaultValue={process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY || ''}
-                    className="w-full rounded-md border border-[#D1D5DB] bg-[#F7F8FA] px-3 py-1.5 text-[12.5px] text-[#171717] focus:border-teal-700 focus:bg-white focus:outline-none font-mono"
+                    defaultValue="******** (Configured on Server)"
+                    disabled
+                    className="w-full rounded-md border border-[#D1D5DB] bg-[#F7F8FA] px-3 py-1.5 text-[12.5px] text-[#171717] focus:border-teal-700 focus:bg-white focus:outline-none font-mono opacity-70 cursor-not-allowed"
                   />
                   <p className="text-[11px] text-[#6B7280] mt-1">
                     Used for real-time global discovery, place ratings, and verified review counts.

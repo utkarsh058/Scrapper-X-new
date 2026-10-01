@@ -61,9 +61,9 @@ export async function POST(req: NextRequest) {
     // 2. Run multi-source merge
     const mergeResult = await multiSourceMergeActor.execute({
       jobId: searchId,
-      input: discovery.businesses,
+      input: discovery.businesses || [],
     });
-    const merged = mergeResult.data.merged;
+    const merged = mergeResult.data?.merged || discovery.businesses || [];
 
     // 3. Location Verification
     const locResult = await locationVerificationActor.execute({
@@ -74,25 +74,28 @@ export async function POST(req: NextRequest) {
         city: verifiedCity,
       },
     });
+    const locVerified = locResult.data?.verified || merged;
 
     // 4. Business Verification
     const bizResult = await businessVerificationActor.execute({
       jobId: searchId,
-      input: locResult.data.verified,
+      input: locVerified,
     });
+    const bizVerified = bizResult.data?.verified || locVerified;
 
     // 5. Deduplication
     const dedupResult = await deduplicationActor.execute({
       jobId: searchId,
-      input: bizResult.data.verified,
+      input: bizVerified,
     });
+    const unique = dedupResult.data?.unique || bizVerified;
 
-    const withPhoneCount = dedupResult.data.unique.filter((l) => Boolean(l.phone)).length;
-    const withEmailCount = dedupResult.data.unique.filter((l) => Boolean(l.email)).length;
-    const withWebsiteCount = dedupResult.data.unique.filter((l) => Boolean(l.website)).length;
+    const withPhoneCount = unique.filter((l) => Boolean(l.phone)).length;
+    const withEmailCount = unique.filter((l) => Boolean(l.email)).length;
+    const withWebsiteCount = unique.filter((l) => Boolean(l.website)).length;
 
     // Contact filtering preview
-    const contactCount = dedupResult.data.unique.filter((l) => {
+    const contactCount = unique.filter((l) => {
       const hasPhone = Boolean(l.phone);
       const hasEmail = Boolean(l.email);
       if (contactFilter === 'Email + Phone') return hasPhone && hasEmail;
@@ -104,7 +107,7 @@ export async function POST(req: NextRequest) {
     }).length;
 
     // Website filtering preview
-    const websiteCount = dedupResult.data.unique.filter((l) => {
+    const websiteCount = unique.filter((l) => {
       const hasWebsite = Boolean(l.website);
       if (websiteFilter === 'No Website') return !hasWebsite;
       if (websiteFilter === 'Website Available') return hasWebsite;
@@ -112,13 +115,13 @@ export async function POST(req: NextRequest) {
     }).length;
 
     const rejectionReasons = {
-      OUTSIDE_LOCATION: locResult.data.rejected.length,
-      MISSING_NAME: bizResult.data.rejected.filter((r) => r.reason === 'MISSING_NAME').length,
-      INVALID_CATEGORY: bizResult.data.rejected.filter((r) => r.reason === 'INVALID_CATEGORY').length,
-      DUPLICATE: mergeResult.data.deduplicatedCount + dedupResult.data.duplicatesCount,
-      NO_CONTACT: dedupResult.data.unique.length - contactCount,
+      OUTSIDE_LOCATION: locResult.data?.rejected?.length || 0,
+      MISSING_NAME: bizResult.data?.rejected?.filter((r) => r.reason === 'MISSING_NAME')?.length || 0,
+      INVALID_CATEGORY: bizResult.data?.rejected?.filter((r) => r.reason === 'INVALID_CATEGORY')?.length || 0,
+      DUPLICATE: (mergeResult.data?.deduplicatedCount || 0) + (dedupResult.data?.duplicatesCount || 0),
+      NO_CONTACT: unique.length - contactCount,
       HAS_WEBSITE: websiteFilter === 'No Website' ? withWebsiteCount : 0,
-      NO_WEBSITE: websiteFilter === 'Website Available' ? dedupResult.data.unique.length - withWebsiteCount : 0,
+      NO_WEBSITE: websiteFilter === 'Website Available' ? unique.length - withWebsiteCount : 0,
       WEBSITE_UNREACHABLE: 0,
       AUDIT_FAILED: 0,
       NOT_QUALIFIED: 0,
@@ -134,21 +137,40 @@ export async function POST(req: NextRequest) {
       success: true,
       searchId,
       query,
+      // Requirement 16: Exact debug schema
+      googlePlaces: {
+        status: discovery.providerStats.googlePlaces?.status || 'DISABLED',
+        discovered: discovery.providerStats.googlePlaces?.rawCount || 0,
+        pagesRequested: discovery.providerStats.googlePlaces?.pagesRequested || (discovery.providerStats.googlePlaces?.rawCount ? 1 : 0),
+        errors: discovery.providerStats.googlePlaces?.errors || [],
+      },
+      osm: {
+        status: discovery.providerStats.osm?.status || 'NO_RESULTS',
+        discovered: discovery.providerStats.osm?.rawCount || 0,
+      },
+      webSearch: {
+        status: discovery.providerStats.webSearch?.status || discovery.providerStats.web?.status || 'NOT_NEEDED',
+        discovered: discovery.providerStats.webSearch?.rawCount ?? discovery.providerStats.web?.rawCount ?? 0,
+      },
+      mergedCount: merged.length,
+      locationVerifiedCount: locVerified.length,
+      deduplicatedCount: (mergeResult.data?.deduplicatedCount || 0) + (dedupResult.data?.duplicatesCount || 0),
+      phoneCount: withPhoneCount,
+      emailCount: withEmailCount,
+      websiteCount: withWebsiteCount,
+      noWebsiteCount: unique.filter((b) => !b.website).length,
+      finalCount: Math.min(unique.length, limit),
+      rejectionReasons,
+
       providerHealth: providerHealthService.checkHealth(),
-      googleStatus: discovery.providerStats.googlePlaces?.status || 'PROVIDER_NOT_CONFIGURED',
-      osmStatus: discovery.providerStats.osm?.status || 'NOT_NEEDED',
+      googleStatus: discovery.providerStats.googlePlaces?.status || 'DISABLED',
+      osmStatus: discovery.providerStats.osm?.status || 'NO_RESULTS',
       rawGoogleCount: discovery.providerStats.googlePlaces?.rawCount || 0,
       rawOSMCount: discovery.providerStats.osm?.rawCount || 0,
       normalizedCount: merged.length,
-      locationVerified: locResult.data.verified.length,
-      locationVerifiedCount: locResult.data.verified.length,
-      deduplicatedCount: mergeResult.data.deduplicatedCount + dedupResult.data.duplicatesCount,
-      phoneCount: withPhoneCount,
-      emailCount: withEmailCount,
-      phoneOrEmailCount: dedupResult.data.unique.filter((b) => Boolean(b.phone || b.email)).length,
-      websiteCount: withWebsiteCount,
-      verifiedNoWebsiteCount: dedupResult.data.unique.filter((b) => !b.website).length,
-      finalCount: Math.min(dedupResult.data.unique.length, limit),
+      locationVerified: locVerified.length,
+      phoneOrEmailCount: unique.filter((b) => Boolean(b.phone || b.email)).length,
+      verifiedNoWebsiteCount: unique.filter((b) => !b.website).length,
       fastPathLatencyMs,
       backgroundJobs: backgroundEnrichmentQueue.getQueueStats(searchId),
       cacheHits: loadStats.cacheHits,
@@ -183,7 +205,6 @@ export async function POST(req: NextRequest) {
       },
       GoogleRequests: usageStats.totalRequests,
       OSMRequests: discovery.providerStats.osm?.status !== 'NOT_NEEDED' ? 1 : 0,
-      rejectionReasons,
       sourceStatus: discovery.sourceComplete ? 'COMPLETE' : 'PARTIAL',
       statusReason: discovery.statusReason,
       overpassQuery: discovery.queryUsed,

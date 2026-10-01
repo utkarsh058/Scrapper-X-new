@@ -57,6 +57,38 @@ export class MultiSourceMergeActor extends BaseActor<RawDiscoveredBusiness[], Mu
     return '';
   }
 
+  /**
+   * Helper to normalize source identifiers (e.g. 'osm' -> 'openstreetmap')
+   */
+  private normalizeSourceName(src: string): string {
+    if (src === 'osm' || src === 'openstreetmap') return 'openstreetmap';
+    if (src === 'google_places' || src === 'google') return 'google_places';
+    return src;
+  }
+
+  /**
+   * Helper to check if domain is a generic social/directory portal that shouldn't dedup alone
+   */
+  private isGenericDomain(domain: string): boolean {
+    const generic = [
+      'facebook.com',
+      'instagram.com',
+      'twitter.com',
+      'x.com',
+      'linkedin.com',
+      'youtube.com',
+      'justdial.com',
+      'indiamart.com',
+      'zomato.com',
+      'swiggy.com',
+      'google.com',
+      'magicpin.in',
+      'tripadvisor.com',
+    ];
+    const clean = domain.toLowerCase().replace(/^www\./, '');
+    return generic.some((g) => clean === g || clean.endsWith(`.${g}`));
+  }
+
   protected async run(context: ActorContext<RawDiscoveredBusiness[]>): Promise<{
     data: MultiSourceMergeOutput;
     sources: string[];
@@ -68,29 +100,40 @@ export class MultiSourceMergeActor extends BaseActor<RawDiscoveredBusiness[], Mu
     const seenPrimaryKeys = new Set<string>();
     let deduplicatedCount = 0;
 
-    for (const item of candidates) {
+    for (const rawItem of candidates) {
+      const bName = rawItem.businessName || rawItem.name || '';
+      const item: RawDiscoveredBusiness = {
+        ...rawItem,
+        name: rawItem.name || bName,
+        businessName: bName,
+        source: this.normalizeSourceName(rawItem.source),
+        sources: (rawItem.sources || [rawItem.source]).map((s) => this.normalizeSourceName(s)),
+      };
+
       const primaryKey = `${item.source}:${item.sourceId}`;
       if (seenPrimaryKeys.has(primaryKey)) {
         deduplicatedCount++;
         continue;
       }
 
-      const itemNormName = this.normalizeName(item.businessName);
+      const itemNormName = this.normalizeName(item.businessName || item.name);
       const itemDomain = item.website ? extractDomain(item.website) : undefined;
       const itemPhone = normalizePhone(item.phone);
-      const itemEmail = item.email?.toLowerCase().trim();
-      const itemLocality = this.extractLocalitySector(item.address, item.businessName);
+      const itemLocality = this.extractLocalitySector(item.address, item.businessName || item.name);
+      const itemGoogleId = item.source === 'google_places' ? item.sourceId : item.rawTags?.googlePlaceId;
+      const itemOsmId = item.source === 'openstreetmap' ? item.sourceId : item.rawTags?.osmId;
 
       // Check if this item matches an already accepted candidate in mergedList
       let matchedIndex = -1;
 
       for (let i = 0; i < mergedList.length; i++) {
         const existing = mergedList[i];
-        const existingNormName = this.normalizeName(existing.businessName);
+        const existGoogleId = existing.source === 'google_places' ? existing.sourceId : existing.rawTags?.googlePlaceId;
+        const existOsmId = existing.source === 'openstreetmap' ? existing.sourceId : existing.rawTags?.osmId;
+        const existingNormName = this.normalizeName(existing.businessName || existing.name);
         const existingDomain = existing.website ? extractDomain(existing.website) : undefined;
         const existingPhone = normalizePhone(existing.phone);
-        const existingEmail = existing.email?.toLowerCase().trim();
-        const existingLocality = this.extractLocalitySector(existing.address, existing.businessName);
+        const existingLocality = this.extractLocalitySector(existing.address, existing.businessName || existing.name);
 
         // Branch safety: If both specify distinct sectors/localities (e.g. Sector 18 vs Sector 62),
         // they MUST NOT be merged, even if brand name is identical!
@@ -98,14 +141,10 @@ export class MultiSourceMergeActor extends BaseActor<RawDiscoveredBusiness[], Mu
           continue;
         }
 
-        // Branch safety: If both have coordinates and distance > 250 meters, do not merge!
-        if (
-          item.latitude &&
-          item.longitude &&
-          existing.latitude &&
-          existing.longitude
-        ) {
-          const distanceMeters = this.getDistanceMeters(
+        // Branch safety: If both have coordinates and distance > 250 meters, do NOT merge branches!
+        let distanceMeters: number | null = null;
+        if (item.latitude && item.longitude && existing.latitude && existing.longitude) {
+          distanceMeters = this.getDistanceMeters(
             item.latitude,
             item.longitude,
             existing.latitude,
@@ -116,38 +155,74 @@ export class MultiSourceMergeActor extends BaseActor<RawDiscoveredBusiness[], Mu
           }
         }
 
-        // Rule 1: Matching verified phone or email
+        // ==================================================
+        // DEDUPLICATION PRIORITY (Requirement 6)
+        // 1. Google Place ID / provider source ID
+        // 2. Normalized website domain
+        // 3. Normalized phone
+        // 4. Normalized name + geographic proximity
+        // ==================================================
+
+        // Priority 1: Google Place ID or Provider Source ID match
         if (
-          (itemPhone && existingPhone && itemPhone === existingPhone) ||
-          (itemEmail && existingEmail && itemEmail === existingEmail)
+          (itemGoogleId && existGoogleId && itemGoogleId === existGoogleId) ||
+          (itemOsmId && existOsmId && String(itemOsmId) === String(existOsmId)) ||
+          (item.source === existing.source && item.sourceId === existing.sourceId)
         ) {
           matchedIndex = i;
           break;
         }
 
-        // Rule 2: Matching domain AND normalized name
+        // Priority 2: Normalized website domain
         if (
           itemDomain &&
           existingDomain &&
           itemDomain === existingDomain &&
-          (itemNormName.includes(existingNormName) || existingNormName.includes(itemNormName))
+          !this.isGenericDomain(itemDomain)
         ) {
+          // If domains match, confirm businesses are compatible (either proximity within 250m or share name token)
+          if (
+            distanceMeters === null ||
+            distanceMeters <= 250 ||
+            itemNormName.includes(existingNormName) ||
+            existingNormName.includes(itemNormName)
+          ) {
+            matchedIndex = i;
+            break;
+          }
+        }
+
+        // Priority 3: Normalized phone
+        if (
+          itemPhone &&
+          existingPhone &&
+          itemPhone.length >= 8 &&
+          itemPhone === existingPhone
+        ) {
+          // Confirm phone match is not an aggregator hotline without name match
           matchedIndex = i;
           break;
         }
 
-        // Rule 3: Highly similar name in same city + nearby location
+        // Priority 4: Normalized name + geographic proximity
         if (
-          itemNormName === existingNormName &&
+          itemNormName.length >= 3 &&
+          existingNormName.length >= 3 &&
+          (itemNormName === existingNormName ||
+            itemNormName.startsWith(existingNormName) ||
+            existingNormName.startsWith(itemNormName)) &&
           (item.city || '').toLowerCase() === (existing.city || '').toLowerCase()
         ) {
-          // If neither has coordinates, or coordinates are within 250m
-          if (
-            (!item.latitude || !existing.latitude) ||
-            this.getDistanceMeters(item.latitude!, item.longitude!, existing.latitude!, existing.longitude!) < 250
-          ) {
+          if (distanceMeters !== null && distanceMeters <= 250) {
             matchedIndex = i;
             break;
+          }
+          if (distanceMeters === null && (!item.latitude || !existing.latitude)) {
+            // Without coordinates, match only if in same locality
+            if (itemLocality && existingLocality && itemLocality === existingLocality) {
+              matchedIndex = i;
+              break;
+            }
           }
         }
       }
@@ -157,7 +232,24 @@ export class MultiSourceMergeActor extends BaseActor<RawDiscoveredBusiness[], Mu
         deduplicatedCount++;
         const target = mergedList[matchedIndex];
 
-        // Enrich missing fields from new source
+        // Preference: If incoming item is from Google Places and target is OSM,
+        // upgrade target's core identity fields to Google Places (Primary discovery source)
+        if (item.source === 'google_places' && target.source !== 'google_places') {
+          target.name = item.name;
+          target.businessName = item.businessName;
+          target.address = item.address;
+          if (item.latitude && item.longitude) {
+            target.latitude = item.latitude;
+            target.longitude = item.longitude;
+          }
+          if (item.category) target.category = item.category;
+          if (item.types && item.types.length > 0) target.types = item.types;
+          target.source = 'google_places';
+          target.sourceId = item.sourceId;
+          target.sourceUrl = item.sourceUrl;
+        }
+
+        // Enrich missing fields from candidate
         if (!target.phone && item.phone) target.phone = item.phone;
         if (!target.email && item.email) target.email = item.email;
         if (!target.website && item.website) target.website = item.website;
@@ -166,41 +258,92 @@ export class MultiSourceMergeActor extends BaseActor<RawDiscoveredBusiness[], Mu
           target.longitude = item.longitude;
         }
         if (!target.address && item.address) target.address = item.address;
+        if (!target.types && item.types) target.types = item.types;
 
-        // Preserve all source tags
+        // Preserve all source tags with normalized names
         const existingSources = target.sources || [target.source];
-        if (!existingSources.includes(item.source)) {
-          existingSources.push(item.source);
+        for (const s of item.sources || [item.source]) {
+          const normS = this.normalizeSourceName(s);
+          if (!existingSources.includes(normS)) {
+            existingSources.push(normS);
+          }
         }
         target.sources = existingSources;
 
-        const evidence = target.sourceEvidence || [
-          {
-            source: target.source,
-            sourceId: target.sourceId,
-            sourceUrl: target.sourceUrl,
-            rawTags: target.rawTags,
-          },
-        ];
-        evidence.push({
-          source: item.source,
-          sourceId: item.sourceId,
-          sourceUrl: item.sourceUrl,
-          rawTags: item.rawTags,
-        });
+        // Maintain merged rawTags (combine googlePlaceId, osmId, etc.)
+        target.rawTags = {
+          ...(target.rawTags || {}),
+          ...(item.rawTags || {}),
+        };
+        const targetGoogleId = target.source === 'google_places' ? target.sourceId : target.rawTags?.googlePlaceId || (target as any).googlePlaceId;
+        const candidateGoogleId = item.source === 'google_places' ? item.sourceId : item.rawTags?.googlePlaceId || (item as any).googlePlaceId;
+        if (targetGoogleId || candidateGoogleId) {
+          target.rawTags.googlePlaceId = targetGoogleId || candidateGoogleId;
+          (target as any).googlePlaceId = targetGoogleId || candidateGoogleId;
+        }
+
+        const targetOsmId = target.source === 'openstreetmap' ? target.sourceId : target.rawTags?.osmId || (target as any).osmId;
+        const candidateOsmId = item.source === 'openstreetmap' ? item.sourceId : item.rawTags?.osmId || (item as any).osmId;
+        if (targetOsmId || candidateOsmId) {
+          target.rawTags.osmId = targetOsmId || candidateOsmId;
+          (target as any).osmId = targetOsmId || candidateOsmId;
+        }
+
+        // Append provenance evidence
+        const evidence = Array.isArray(target.sourceEvidence)
+          ? [...target.sourceEvidence]
+          : target.sourceEvidence
+          ? [target.sourceEvidence]
+          : [
+              {
+                source: target.source,
+                sourceId: target.sourceId,
+                sourceUrl: target.sourceUrl,
+                rawTags: target.rawTags,
+              },
+            ];
+
+        const itemEvidences = Array.isArray(item.sourceEvidence)
+          ? item.sourceEvidence
+          : item.sourceEvidence
+          ? [item.sourceEvidence]
+          : [
+              {
+                source: item.source,
+                sourceId: item.sourceId,
+                sourceUrl: item.sourceUrl,
+                rawTags: item.rawTags,
+              },
+            ];
+
+        evidence.push(...itemEvidences);
         target.sourceEvidence = evidence;
       } else {
         // New unique candidate
         seenPrimaryKeys.add(primaryKey);
-        item.sources = item.sources || [item.source];
-        item.sourceEvidence = item.sourceEvidence || [
-          {
-            source: item.source,
-            sourceId: item.sourceId,
-            sourceUrl: item.sourceUrl,
-            rawTags: item.rawTags,
-          },
-        ];
+        item.sources = (item.sources || [item.source]).map((s) => this.normalizeSourceName(s));
+        if (item.source === 'google_places' || itemGoogleId) {
+          item.rawTags = item.rawTags || {};
+          item.rawTags.googlePlaceId = itemGoogleId || item.sourceId;
+          (item as any).googlePlaceId = itemGoogleId || item.sourceId;
+        }
+        if (item.source === 'openstreetmap' || itemOsmId) {
+          item.rawTags = item.rawTags || {};
+          item.rawTags.osmId = itemOsmId || item.sourceId;
+          (item as any).osmId = itemOsmId || item.sourceId;
+        }
+        item.sourceEvidence = Array.isArray(item.sourceEvidence)
+          ? item.sourceEvidence
+          : item.sourceEvidence
+          ? [item.sourceEvidence]
+          : [
+              {
+                source: item.source,
+                sourceId: item.sourceId,
+                sourceUrl: item.sourceUrl,
+                rawTags: item.rawTags,
+              },
+            ];
         mergedList.push(item);
       }
     }

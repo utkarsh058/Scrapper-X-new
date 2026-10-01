@@ -20,7 +20,7 @@ import { AIMessagesView } from '@/components/views/AIMessagesView';
 import { DemoWebsitesView } from '@/components/views/DemoWebsitesView';
 import { SettingsView } from '@/components/views/SettingsView';
 
-import { mockLeads, mockMetricSummary } from '@/data/mockData';
+
 import { NavTab, Lead, ToastMessage, ContactFilter, WebsiteFilter, NumberOfLeads, SearchSummary, SearchStatusType, PipelineStats, ProviderStats, PipelineBreakdown, RejectedCandidateItem } from '@/types';
 import { LeadFilterCriteria } from '@/components/dashboard/LeadSearchCard';
 import { parseApiResponse, LeadPilotApiError } from '@/lib/apiClient';

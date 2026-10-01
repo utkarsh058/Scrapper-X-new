@@ -17,11 +17,12 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
   /**
    * Configurable field mask: only discovery essentials.
    * Excluding expensive SKUs like photos, reviews, and atmosphere.
+   * Explicitly avoids wildcard "*" for production cost control.
    */
   private getFieldMask(): string {
     return (
       process.env.GOOGLE_PLACES_FIELD_MASK ||
-      'places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.types,places.internationalPhoneNumber,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,nextPageToken'
+      'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri,nextPageToken'
     );
   }
 
@@ -53,7 +54,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
   public async discoverBusinesses(params: SearchDiscoveryParams): Promise<DiscoveryResult> {
     const startTime = Date.now();
     const resolvedArea = params.city ? `${params.city}, ${params.state}` : params.state;
-    const country = params.country || 'India';
+    const country = 'India'; // LeadPilot is strictly India-only
     const textQuery = `${params.industry} in ${resolvedArea}, ${country}`;
 
     if (GooglePlacesDiscoveryProvider.simulateTimeout) {
@@ -64,8 +65,9 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'PROVIDER_FAILURE',
+        status: 'FAILED',
         statusReason: 'Google Places API fast-path query timed out after 3000ms (Simulated).',
+        pagesRequested: 1,
         errors: ['GOOGLE_TIMEOUT'],
         durationMs: 3000,
       };
@@ -79,8 +81,9 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'PROVIDER_FAILURE',
+        status: 'FAILED',
         statusReason: 'Google Places API quota exceeded (Simulated).',
+        pagesRequested: 1,
         errors: ['GOOGLE_QUOTA_EXCEEDED'],
         durationMs: 15,
       };
@@ -88,6 +91,8 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
 
     if (GooglePlacesDiscoveryProvider.simulateResults !== null) {
       const simList = GooglePlacesDiscoveryProvider.simulateResults;
+      const requestedLimit = params.limit || 20;
+      const simStatus = simList.length >= requestedLimit ? 'SUCCESS' : simList.length > 0 ? 'PARTIAL' : 'NO_RESULTS';
       return {
         providerId: this.providerId,
         providerName: this.name,
@@ -95,8 +100,9 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: simList.length,
         businesses: simList,
         sourceComplete: simList.length > 0,
-        status: simList.length > 0 ? 'COMPLETE' : 'NO_RESULTS',
+        status: simStatus,
         statusReason: `Discovered ${simList.length} places via Google Places API (Simulated).`,
+        pagesRequested: 1,
         errors: [],
         durationMs: 120,
       };
@@ -114,8 +120,9 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'PROVIDER_NOT_CONFIGURED',
+        status: 'DISABLED',
         statusReason: 'Google Places discovery is disabled via GOOGLE_PLACES_ENABLED=false.',
+        pagesRequested: 0,
         errors: ['GOOGLE_PLACES_DISABLED'],
         durationMs: 0,
       };
@@ -129,8 +136,9 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'PROVIDER_NOT_CONFIGURED',
+        status: 'DISABLED',
         statusReason: 'GOOGLE_PLACES_NOT_CONFIGURED: Missing GOOGLE_PLACES_API_KEY.',
+        pagesRequested: 0,
         errors: ['GOOGLE_PLACES_NOT_CONFIGURED'],
         durationMs: 0,
       };
@@ -147,8 +155,9 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'PROVIDER_FAILURE',
+        status: 'FAILED',
         statusReason: budgetCheck.reason || 'Google Places quota reached or blocked by budget policy.',
+        pagesRequested: 0,
         errors: [budgetCheck.reason || 'QUOTA_EXCEEDED'],
         durationMs: Date.now() - startTime,
       };
@@ -157,7 +166,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
     const fieldMask = this.getFieldMask();
     const targetPool = Math.max((params.limit || 20) * 3, 60);
     const timeouts = getTimeoutConfig();
-    const effectiveTimeout = Math.max(timeouts.googlePlacesFastMs || 3000, 3000);
+    const effectiveTimeout = Math.max(timeouts.googlePlacesFastMs || 8000, 5000);
 
     // 3. Concurrency Semaphore acquisition
     const releaseSemaphore = await semaphores.googlePlaces.acquire();
@@ -167,7 +176,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
       const seenPlaceIds = new Set<string>();
       let nextPageToken: string | undefined = undefined;
       let pageCount = 0;
-      const maxPages = 3; // Google Places Text Search (New) supports up to 3 pages (60 places)
+      const maxPages = Math.min(Math.ceil(targetPool / 20), 3); // Google Places Text Search (New) supports up to 3 pages (60 places)
 
       do {
         pageCount++;
@@ -203,16 +212,28 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
               const raw = await res.text();
 
               if (!res.ok) {
+                let errorMessage = `HTTP ${res.status}`;
+                try {
+                  const errorData = JSON.parse(raw);
+                  if (errorData.error?.message) {
+                    errorMessage = `${errorMessage}: ${errorData.error.message}`;
+                  } else {
+                    errorMessage = `${errorMessage}: ${raw.slice(0, 300)}`;
+                  }
+                } catch {
+                  errorMessage = `${errorMessage}: ${raw.slice(0, 300)}`;
+                }
+
                 googleUsageTracker.recordOperation({
                   operation: 'TEXT_SEARCH',
                   success: false,
                   statusCode: res.status,
                   durationMs,
                   query: textQuery,
-                  error: `HTTP ${res.status}: ${raw.slice(0, 300)}`,
+                  error: errorMessage,
                 });
 
-                const errorObj: any = new Error(`Google Places API HTTP ${res.status}: ${raw.slice(0, 300)}`);
+                const errorObj: any = new Error(errorMessage);
                 errorObj.status = res.status;
                 throw errorObj;
               }
@@ -270,13 +291,13 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
 
           const name = p.displayName?.text || 'Unnamed Business';
           const address = p.formattedAddress || '';
-          const phone = p.internationalPhoneNumber || p.nationalPhoneNumber;
+          const phone = p.nationalPhoneNumber || p.internationalPhoneNumber;
           const website = p.websiteUri;
-          const category = p.primaryType || params.industry;
+          const types = p.types || [];
+          const category = p.primaryType || (types.length > 0 ? types[0] : params.industry);
           const lat = p.location?.latitude;
           const lon = p.location?.longitude;
-          const rating = typeof p.rating === 'number' ? p.rating : undefined;
-          const userRatingCount = typeof p.userRatingCount === 'number' ? p.userRatingCount : undefined;
+          const mapsUrl = p.googleMapsUri || `https://www.google.com/maps/place/?q=place_id:${placeId}`;
 
           // Cache place in PlaceCache
           googleDiscoveryCache.setPlace({
@@ -295,7 +316,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
             source: 'google_places',
             sources: ['google_places'],
             sourceId: placeId,
-            sourceUrl: `https://www.google.com/maps/place/?q=place_id:${placeId}`,
+            sourceUrl: mapsUrl,
             confidence: 'high',
             name,
             businessName: name,
@@ -307,25 +328,46 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
             longitude: lon,
             phone,
             website,
+            types,
             rawTags: {
               googlePlaceId: placeId,
               primaryType: p.primaryType,
-              types: p.types,
-              rating,
-              userRatingCount,
+              types,
+              displayName: p.displayName?.text,
+              formattedAddress: p.formattedAddress,
+              googleMapsUri: p.googleMapsUri,
+              location: p.location,
+              nationalPhoneNumber: p.nationalPhoneNumber,
+              internationalPhoneNumber: p.internationalPhoneNumber,
+              websiteUri: p.websiteUri,
             },
+            sourceEvidence: [
+              {
+                source: 'google_places',
+                sourceId: placeId,
+                sourceUrl: mapsUrl,
+                rawTags: {
+                  googlePlaceId: placeId,
+                  types,
+                  primaryType: p.primaryType,
+                },
+              },
+            ],
           });
         }
 
         nextPageToken = responseData.nextPageToken;
         if (nextPageToken && businesses.length < targetPool && pageCount < maxPages) {
           // Google Places API token requires slight propagation delay
-          await new Promise((r) => setTimeout(r, 150));
+          await new Promise((r) => setTimeout(r, 200));
         }
       } while (nextPageToken && businesses.length < targetPool && pageCount < maxPages);
 
       const durationMs = Date.now() - startTime;
       const rawCount = businesses.length;
+      const requestedLimit = params.limit || 20;
+      const status: 'SUCCESS' | 'PARTIAL' | 'NO_RESULTS' =
+        rawCount >= requestedLimit ? 'SUCCESS' : rawCount > 0 ? 'PARTIAL' : 'NO_RESULTS';
 
       return {
         providerId: this.providerId,
@@ -334,11 +376,12 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount,
         businesses,
         sourceComplete: rawCount > 0,
-        status: rawCount > 0 ? 'COMPLETE' : 'NO_RESULTS',
+        status,
         statusReason:
           rawCount > 0
             ? `Google Places discovered ${rawCount} real businesses (${pageCount} page${pageCount > 1 ? 's' : ''}) in ${durationMs}ms.`
             : `Google Places searched successfully but found zero businesses for ${textQuery}.`,
+        pagesRequested: pageCount,
         queryUsed: textQuery,
         endpointUsed: 'https://places.googleapis.com/v1/places:searchText',
         durationMs,
@@ -355,10 +398,11 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'PROVIDER_FAILURE',
+        status: 'FAILED',
         statusReason: isTimeout
-          ? `Google Places timed out after ${timeouts.googlePlacesFastMs}ms.`
+          ? `Google Places timed out after ${effectiveTimeout}ms.`
           : `Google Places provider failure: ${err.message}`,
+        pagesRequested: 1,
         errors: [err.message],
         durationMs,
       };

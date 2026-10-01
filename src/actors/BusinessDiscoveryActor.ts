@@ -6,6 +6,7 @@ import { providerManager } from '@/lib/providers/ProviderManager';
 export interface ProviderStat {
   rawCount: number;
   discovered?: number;
+  pagesRequested?: number;
   status:
     | 'COMPLETE'
     | 'PARTIAL'
@@ -109,6 +110,7 @@ export class BusinessDiscoveryActor extends BaseActor<SearchDiscoveryParams, Bus
     const gStat: ProviderStat = {
       rawCount: managerResult.providers.googlePlaces.rawCount,
       discovered: managerResult.providers.googlePlaces.rawCount,
+      pagesRequested: managerResult.providers.googlePlaces.pagesRequested,
       status: managerResult.providers.googlePlaces.status as any,
       durationMs: managerResult.latencies.googleMs,
       reason: managerResult.providers.googlePlaces.reason,

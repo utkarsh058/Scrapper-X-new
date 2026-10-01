@@ -16,7 +16,7 @@ export class GooglePlacesNewProvider {
   private getFieldMask(): string {
     return (
       process.env.GOOGLE_PLACES_FIELD_MASK ||
-      'places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.types,places.internationalPhoneNumber,places.nationalPhoneNumber,places.websiteUri'
+      'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri'
     );
   }
 

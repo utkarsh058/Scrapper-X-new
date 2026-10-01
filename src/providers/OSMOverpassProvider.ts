@@ -20,6 +20,7 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
     const timeouts = getTimeoutConfig();
 
     // 0. Configuration check
+    // 0. Configuration check
     if (process.env.OSM_ENABLED === 'false') {
       return {
         providerId: this.providerId,
@@ -28,7 +29,7 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'PROVIDER_NOT_CONFIGURED',
+        status: 'DISABLED',
         statusReason: 'OpenStreetMap discovery is disabled via OSM_ENABLED=false.',
         errors: ['OSM_DISABLED'],
         durationMs: 0,
@@ -46,7 +47,7 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
       }
 
       // 3. Circuit breaker + strict timeout
-      const effectiveTimeout = Math.max(timeouts.osmFastMs || 2000, 3000);
+      const effectiveTimeout = Math.max(timeouts.osmFastMs || 4000, 4000);
       const discovery = await osmCircuitBreaker.execute(async () => {
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => {
@@ -69,10 +70,13 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
       const businesses: RawDiscoveredBusiness[] = (discovery?.leads || []).map((lead: any) => {
         const name = lead.businessName || lead.name || '';
         const postalCode = lead.postcode || lead.location?.postcode;
+        const sourceUrl = lead.sourceUrl || (lead.osmType && lead.osmId ? `https://www.openstreetmap.org/${lead.osmType}/${lead.osmId}` : undefined);
+        const sourceId = String(lead.osmId || lead.id);
+
         return {
-          source: 'osm',
-          sources: ['osm'],
-          sourceId: String(lead.osmId || lead.id),
+          source: 'openstreetmap',
+          sources: ['openstreetmap'],
+          sourceId,
           osmType: lead.osmType,
           osmId: lead.osmId ? Number(lead.osmId) : undefined,
           categoryTag: lead.categoryTag || lead.category,
@@ -90,13 +94,28 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
           email: lead.email && lead.email !== 'Not available' ? lead.email : undefined,
           website: lead.websiteUrl || (typeof lead.website === 'string' ? lead.website : lead.website?.url),
           openingHours: lead.openingHours,
-          sourceUrl: lead.sourceUrl || (lead.osmType && lead.osmId ? `https://www.openstreetmap.org/${lead.osmType}/${lead.osmId}` : undefined),
+          sourceUrl,
           rawTags: lead.rawTags || {},
+          sourceEvidence: [
+            {
+              source: 'openstreetmap',
+              sourceId,
+              sourceUrl,
+              rawTags: {
+                osmId: lead.osmId,
+                osmType: lead.osmType,
+                ...(lead.rawTags || {}),
+              },
+            },
+          ],
         };
       });
 
       const durationMs = Date.now() - startTime;
       const rawCount = businesses.length;
+      const requestedLimit = params.limit || 20;
+      const status: 'SUCCESS' | 'PARTIAL' | 'NO_RESULTS' =
+        rawCount >= requestedLimit ? 'SUCCESS' : rawCount > 0 ? 'PARTIAL' : 'NO_RESULTS';
 
       return {
         providerId: this.providerId,
@@ -105,7 +124,7 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
         rawCount,
         businesses,
         sourceComplete: rawCount > 0,
-        status: rawCount > 0 ? 'COMPLETE' : 'NO_RESULTS',
+        status,
         statusReason:
           rawCount > 0
             ? `Discovered ${rawCount} real candidates from OpenStreetMap.`
@@ -123,7 +142,7 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'PROVIDER_FAILURE',
+        status: 'FAILED',
         statusReason: `OSM query failed: ${err.message}`,
         errors: [err.message],
         durationMs: Date.now() - startTime,
