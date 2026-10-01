@@ -1,0 +1,130 @@
+import { JobStatus, ActorStatus, SearchStatusType } from './Enums';
+import { SearchRequestPayload } from '@/types';
+import { LeadEntity } from './Lead';
+
+export interface RejectionBreakdown {
+  OUTSIDE_LOCATION: number;
+  INVALID_CATEGORY: number;
+  MISSING_NAME: number;
+  DUPLICATE: number;
+  NO_CONTACT: number;
+  HAS_WEBSITE: number;
+  NO_WEBSITE: number;
+  WEBSITE_UNREACHABLE: number;
+  AUDIT_FAILED: number;
+  NOT_QUALIFIED: number;
+  OTHER: number;
+}
+
+export interface PipelineBreakdown {
+  rawDiscoveredCount: number;
+  normalizedCount: number;
+  locationVerifiedCount: number;
+  deduplicatedCount: number;
+  phoneCount: number;
+  emailCount: number;
+  phoneOrEmailCount: number;
+  websiteAvailableCount: number;
+  websiteUnavailableCount: number;
+  websiteUnreachableCount: number;
+  finalQualifiedCount: number;
+}
+
+export interface RejectedCandidateItem {
+  name: string;
+  businessName?: string;
+  category?: string;
+  city?: string;
+  state?: string;
+  phone?: string;
+  email?: string;
+  websiteUrl?: string;
+  websiteStatus?: string;
+  rejectionReason: 'NO_CONTACT' | 'HAS_WEBSITE' | 'NO_WEBSITE' | 'WEBSITE_UNREACHABLE' | 'OUTSIDE_LOCATION' | 'DUPLICATE' | 'MISSING_NAME' | 'OTHER';
+  reason?: string;
+  rejectionDetails?: string;
+}
+
+export interface ProgressStep {
+  actorId: string;
+  stepName: string;
+  message: string;
+  count?: number;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  timestamp: string;
+}
+
+export interface Job {
+  id: string;
+  searchId: string;
+  status: JobStatus;
+  criteria: SearchRequestPayload;
+  requestedLeads: number;
+
+  // Pipeline counters
+  discovered: number;
+  verified: number;
+  deduplicated: number;
+  enriched: number;
+  audited: number;
+  qualified: number;
+  completed: number;
+  failed: number;
+
+  sourceStatus: SearchStatusType;
+  sourceComplete: boolean;
+  statusReason?: string;
+
+  providerStats?: {
+    osm: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
+    web: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
+    webSearch?: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
+    businessProvider?: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
+    directory?: { rawCount: number; status: 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'DISABLED' | 'NO_RESULTS'; durationMs: number; reason?: string; errors?: string[] };
+  };
+
+  providersReport?: {
+    osm: { status: string; discovered: number; errors?: string[] };
+    webSearch: { status: string; discovered: number; errors?: string[] };
+    businessProvider: { status: string; discovered: number; errors?: string[] };
+  };
+
+  mergedCount?: number;
+  normalizedCount?: number;
+  locationVerifiedCount?: number;
+  deduplicatedCount?: number;
+  phoneCount?: number;
+  emailCount?: number;
+  phoneOrEmailCount?: number;
+  websiteDiscoveredCount?: number;
+  websiteVerifiedCount?: number;
+  noWebsiteCount?: number;
+  enrichedCount?: number;
+  finalCount?: number;
+
+  rejectionReasons: RejectionBreakdown;
+  pipelineBreakdown?: PipelineBreakdown;
+  rejectedCandidates?: RejectedCandidateItem[];
+  progressLog: ProgressStep[];
+
+  leads: LeadEntity[];
+
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
+export interface ActorRun {
+  id: string;
+  jobId: string;
+  actorId: string;
+  status: ActorStatus;
+  startedAt: string;
+  completedAt?: string;
+  attempts: number;
+  inputReference?: string;
+  outputReference?: string;
+  metrics: Record<string, any>;
+  errors: string[];
+  warnings: string[];
+}

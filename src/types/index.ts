@@ -101,6 +101,80 @@ export interface SearchSummary {
   unreachable: number;
 }
 
+export type SearchStatusType = 'COMPLETE' | 'PARTIAL' | 'NO_RESULTS' | 'FAILED';
+
+export interface PipelineStats {
+  rawOsmCount: number;
+  namedCount: number;
+  inCityBoundsCount: number;
+  deduplicatedCount: number;
+  withPhoneCount: number;
+  withEmailCount: number;
+  withWebsiteCount: number;
+  contactFilteredCount: number;
+  websiteFilteredCount: number;
+  finalDeliveredCount: number;
+  requestedLimit: number;
+}
+
+export interface SearchDiagnostics {
+  searchStatus: SearchStatusType;
+  sourceComplete: boolean;
+  statusReason?: string;
+  pipelineStats: PipelineStats;
+  discardedBreakdown: {
+    noName: number;
+    outsideCity: number;
+    duplicate: number;
+    contactFilterExcluded: number;
+    websiteFilterExcluded: number;
+  };
+  meta: {
+    industry: string;
+    state: string;
+    city?: string;
+    osmAreaResolved?: string;
+    queryDurationMs: number;
+    overpassEndpoint?: string;
+  };
+}
+
+export interface ProviderStats {
+  osm: { rawCount: number; status: string; durationMs: number; errors?: string[] };
+  web: { rawCount: number; status: string; durationMs: number; errors?: string[] };
+  webSearch?: { rawCount: number; status: string; durationMs: number; errors?: string[] };
+  businessProvider?: { rawCount: number; status: string; durationMs: number; errors?: string[] };
+  directory?: { rawCount: number; status: string; durationMs: number; errors?: string[] };
+}
+
+export interface PipelineBreakdown {
+  rawDiscoveredCount: number;
+  normalizedCount: number;
+  inCityBoundsCount: number;
+  deduplicatedCount: number;
+  phoneCount: number;
+  emailCount: number;
+  phoneOrEmailCount: number;
+  websiteAvailableCount: number;
+  websiteUnavailableCount: number;
+  websiteUnreachableCount: number;
+  finalQualifiedCount: number;
+}
+
+export interface RejectedCandidateItem {
+  name: string;
+  category?: string;
+  city?: string;
+  state?: string;
+  phone?: string;
+  email?: string;
+  websiteUrl?: string;
+  websiteStatus?: string;
+  sources?: string[];
+  rejectionReason: 'NO_CONTACT' | 'HAS_WEBSITE' | 'NO_WEBSITE' | 'WEBSITE_UNREACHABLE' | 'OUTSIDE_LOCATION' | 'DUPLICATE' | 'MISSING_NAME' | 'OTHER';
+  rejectionDetails?: string;
+}
+
 export interface SearchRequestPayload {
   country: 'India';
   state: string;
@@ -115,20 +189,29 @@ export type LeadStatus = 'New' | 'In Review' | 'Contacted' | 'Qualified' | 'Unre
 
 export interface Lead {
   id: string;
-  source: string; // e.g. "OpenStreetMap" or "OSM + Firecrawl"
+  source: string; // e.g. "openstreetmap"
+  sources?: string[];
+  sourceEvidence?: any[];
   sourceId?: string; // e.g. "osm:node:12345"
-  placeId?: string; // OSM id or legacy reference
+  osmType?: 'node' | 'way' | 'relation';
+  osmId?: number | string;
+  placeId?: string;
   businessName: string;
   legalName?: string;
   category: string;
   industry: string;
   address?: string;
-  state?: string;
+  street?: string;
   city?: string;
+  state?: string;
   postcode?: string;
-  phone?: string;
-  email?: string;
+  country?: string;
+  phone?: string | null;
+  phoneSource?: string | null;
+  email?: string | null;
+  emailSource?: string | null;
   websiteUrl?: string;
+  websiteSource?: string | null;
   latitude?: number;
   longitude?: number;
   openingHours?: string;
@@ -136,6 +219,8 @@ export interface Lead {
   websiteStatus?: WebsiteStatus;
   websiteIssues?: string[];
   websiteAudit?: StructuredWebsiteAudit;
+  sourceUrl?: string;
+  discoveredAt?: string;
   createdAt?: string;
   updatedAt?: string;
   dateDiscovered?: string;

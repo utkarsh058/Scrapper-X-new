@@ -4,7 +4,11 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Menu, X, Compass, Sparkles } from 'lucide-react';
 
-export function Navbar() {
+interface NavbarProps {
+  onNavigate?: (view: 'landing' | 'dashboard' | 'auth', authMode?: 'signin' | 'signup') => void;
+}
+
+export function Navbar({ onNavigate }: NavbarProps = {}) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -26,8 +30,8 @@ export function Navbar() {
         }`}
       >
         {/* Left: Brand + AI Badge */}
-        <Link
-          href="/"
+        <div
+          onClick={() => onNavigate?.('landing')}
           className="flex items-center gap-2.5 group cursor-pointer select-none"
         >
           <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-sm group-hover:bg-slate-800 transition-colors">
@@ -47,7 +51,7 @@ export function Navbar() {
               AI
             </span>
           </div>
-        </Link>
+        </div>
 
         {/* Center: Navigation Links */}
         <nav className="hidden md:flex items-center gap-1 lg:gap-2">
@@ -84,21 +88,48 @@ export function Navbar() {
         </nav>
 
         {/* Right: Actions */}
-        <div className="hidden sm:flex items-center gap-3">
-          <Link
-            href="/signin"
-            className="text-[13px] font-medium text-slate-600 hover:text-slate-900 px-3 py-1.5 transition-colors"
+        <div className="hidden sm:flex items-center gap-2 sm:gap-3">
+          <button
+            onClick={() => onNavigate ? onNavigate('dashboard') : (window.location.href = '/dashboard')}
+            className="text-[13px] font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100/80 border border-teal-200/70 px-3.5 py-1.5 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs hover:scale-[1.02] active:scale-[0.98]"
           >
-            Sign In
-          </Link>
+            <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+            <span>Dashboard</span>
+          </button>
 
-          <Link
-            href="/signup"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[13px] font-medium text-white bg-slate-900 hover:bg-slate-800 transition-all duration-200 shadow-sm hover:shadow hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <span>Get Started</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
+          {onNavigate ? (
+            <button
+              onClick={() => onNavigate('auth', 'signin')}
+              className="text-[13px] font-medium text-slate-600 hover:text-slate-900 px-3 py-1.5 transition-colors cursor-pointer"
+            >
+              Sign In
+            </button>
+          ) : (
+            <Link
+              href="/signin"
+              className="text-[13px] font-medium text-slate-600 hover:text-slate-900 px-3 py-1.5 transition-colors"
+            >
+              Sign In
+            </Link>
+          )}
+
+          {onNavigate ? (
+            <button
+              onClick={() => onNavigate('dashboard')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[13px] font-medium text-white bg-slate-900 hover:bg-slate-800 transition-all duration-200 shadow-sm hover:shadow hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            >
+              <span>Get Started</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          ) : (
+            <Link
+              href="/signup"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[13px] font-medium text-white bg-slate-900 hover:bg-slate-800 transition-all duration-200 shadow-sm hover:shadow hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <span>Get Started</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          )}
         </div>
 
         {/* Mobile menu button */}

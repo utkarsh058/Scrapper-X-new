@@ -1,6 +1,8 @@
 /**
  * Maps LeadPilot industry categories to OpenStreetMap (OSM) key/value tags.
- * Designed to be modular so additional industry mappings can easily be added.
+ * Designed to strictly adhere to official OSM tagging conventions.
+ * Includes complete variant tags (e.g. tourism=hotel, guest_house, hostel, motel, resort, building=hotel)
+ * to ensure no valid businesses are omitted.
  */
 
 export interface OsmTagCondition {
@@ -16,171 +18,212 @@ export interface IndustryMapping {
 
 export const OSM_INDUSTRY_MAPPINGS: Record<string, OsmTagCondition[]> = {
   // 1. Food & Hospitality
-  'Restaurants': [
+  'restaurant': [
     { key: 'amenity', value: 'restaurant' },
     { key: 'amenity', value: 'fast_food' }
   ],
-  'Restaurant': [
-    { key: 'amenity', value: 'restaurant' }
+  'restaurants': [
+    { key: 'amenity', value: 'restaurant' },
+    { key: 'amenity', value: 'fast_food' }
   ],
-  'Cafes': [
-    { key: 'amenity', value: 'cafe' }
+  'cafe': [
+    { key: 'amenity', value: 'cafe' },
+    { key: 'shop', value: 'coffee' }
   ],
-  'Cafe': [
-    { key: 'amenity', value: 'cafe' }
+  'cafes': [
+    { key: 'amenity', value: 'cafe' },
+    { key: 'shop', value: 'coffee' }
   ],
-  'Hotels': [
+  'hotel': [
     { key: 'tourism', value: 'hotel' },
-    { key: 'tourism', value: 'guest_house' }
+    { key: 'tourism', value: 'guest_house' },
+    { key: 'tourism', value: 'hostel' },
+    { key: 'tourism', value: 'motel' },
+    { key: 'tourism', value: 'resort' },
+    { key: 'building', value: 'hotel' },
+    { key: 'amenity', value: 'hotel' }
   ],
-  'Hotel': [
-    { key: 'tourism', value: 'hotel' }
+  'hotels': [
+    { key: 'tourism', value: 'hotel' },
+    { key: 'tourism', value: 'guest_house' },
+    { key: 'tourism', value: 'hostel' },
+    { key: 'tourism', value: 'motel' },
+    { key: 'tourism', value: 'resort' },
+    { key: 'building', value: 'hotel' },
+    { key: 'amenity', value: 'hotel' }
   ],
 
   // 2. Health & Wellness
-  'Hospitals': [
-    { key: 'amenity', value: 'hospital' }
+  'hospital': [
+    { key: 'amenity', value: 'hospital' },
+    { key: 'healthcare', value: 'hospital' }
   ],
-  'Hospital': [
-    { key: 'amenity', value: 'hospital' }
+  'hospitals': [
+    { key: 'amenity', value: 'hospital' },
+    { key: 'healthcare', value: 'hospital' }
   ],
-  'Clinics': [
+  'clinic': [
     { key: 'amenity', value: 'clinic' },
     { key: 'amenity', value: 'doctors' },
     { key: 'healthcare', value: 'clinic' }
   ],
-  'Clinic': [
+  'clinics': [
     { key: 'amenity', value: 'clinic' },
-    { key: 'amenity', value: 'doctors' }
+    { key: 'amenity', value: 'doctors' },
+    { key: 'healthcare', value: 'clinic' }
   ],
-  'Pharmacy': [
-    { key: 'amenity', value: 'pharmacy' }
+  'pharmacy': [
+    { key: 'amenity', value: 'pharmacy' },
+    { key: 'healthcare', value: 'pharmacy' },
+    { key: 'shop', value: 'chemist' }
   ],
-  'Gyms': [
+  'pharmacies': [
+    { key: 'amenity', value: 'pharmacy' },
+    { key: 'healthcare', value: 'pharmacy' },
+    { key: 'shop', value: 'chemist' }
+  ],
+  'gym': [
     { key: 'leisure', value: 'fitness_centre' },
     { key: 'leisure', value: 'sports_centre' }
   ],
-  'Gym': [
-    { key: 'leisure', value: 'fitness_centre' }
+  'gyms': [
+    { key: 'leisure', value: 'fitness_centre' },
+    { key: 'leisure', value: 'sports_centre' }
   ],
-  'Salons': [
+  'salon': [
     { key: 'shop', value: 'hairdresser' },
     { key: 'shop', value: 'beauty' }
   ],
-  'Salon': [
+  'salons': [
     { key: 'shop', value: 'hairdresser' },
     { key: 'shop', value: 'beauty' }
   ],
 
   // 3. Education
-  'Education': [
-    { key: 'amenity', value: 'school' },
+  'school': [
+    { key: 'amenity', value: 'school' }
+  ],
+  'schools': [
+    { key: 'amenity', value: 'school' }
+  ],
+  'college': [
     { key: 'amenity', value: 'college' },
     { key: 'amenity', value: 'university' }
   ],
-  'School': [
-    { key: 'amenity', value: 'school' }
+  'colleges': [
+    { key: 'amenity', value: 'college' },
+    { key: 'amenity', value: 'university' }
   ],
-  'College': [
+  'education': [
+    { key: 'amenity', value: 'school' },
     { key: 'amenity', value: 'college' },
     { key: 'amenity', value: 'university' }
   ],
 
   // 4. Finance & Utilities
-  'Bank': [
+  'bank': [
     { key: 'amenity', value: 'bank' }
   ],
-  'Petrol Pump': [
+  'banks': [
+    { key: 'amenity', value: 'bank' }
+  ],
+  'petrol pump': [
+    { key: 'amenity', value: 'fuel' }
+  ],
+  'fuel': [
     { key: 'amenity', value: 'fuel' }
   ],
 
   // 5. Commerce & Retail
-  'Retail': [
+  'supermarket': [
+    { key: 'shop', value: 'supermarket' },
+    { key: 'shop', value: 'convenience' }
+  ],
+  'supermarkets': [
+    { key: 'shop', value: 'supermarket' },
+    { key: 'shop', value: 'convenience' }
+  ],
+  'retail': [
     { key: 'shop', value: 'supermarket' },
     { key: 'shop', value: 'convenience' },
     { key: 'shop', value: 'department_store' },
     { key: 'shop', value: 'clothes' }
   ],
-  'Supermarket': [
-    { key: 'shop', value: 'supermarket' }
-  ],
-  'Travel Agency': [
+  'travel agency': [
     { key: 'shop', value: 'travel_agency' },
     { key: 'office', value: 'travel_agent' }
   ],
-  'Travel': [
+  'travel': [
     { key: 'shop', value: 'travel_agency' },
     { key: 'office', value: 'travel_agent' },
     { key: 'tourism', value: 'information' }
   ],
-  'Real Estate': [
+  'real estate': [
     { key: 'office', value: 'estate_agent' },
     { key: 'office', value: 'real_estate' }
   ],
-  'Automotive': [
+  'automotive': [
     { key: 'shop', value: 'car' },
-    { key: 'shop', value: 'car_repair' },
-    { key: 'shop', value: 'motorcycle' }
+    { key: 'shop', value: 'car_repair' }
   ],
-  'Construction': [
+  'construction': [
     { key: 'craft', value: 'builder' },
-    { key: 'office', value: 'architect' },
-    { key: 'office', value: 'engineer' }
+    { key: 'office', value: 'architect' }
   ],
-  'Other': [
+  'other': [
     { key: 'office', value: 'company' },
-    { key: 'shop' },
-    { key: 'amenity', value: 'commercial' }
+    { key: 'shop' }
   ]
 };
 
 /**
- * Returns OSM tag conditions for a given industry name (case-insensitive with fallback).
+ * Returns OSM tag conditions for a given industry name (case-insensitive with exact mapping).
  */
 export function getOsmTagsForIndustry(industry: string): OsmTagCondition[] {
-  const normalized = industry.trim();
-  
-  // Exact match
+  const normalized = industry.trim().toLowerCase();
+
   if (OSM_INDUSTRY_MAPPINGS[normalized]) {
     return OSM_INDUSTRY_MAPPINGS[normalized];
   }
 
-  // Case-insensitive lookup
-  const lower = normalized.toLowerCase();
-  for (const [key, tags] of Object.entries(OSM_INDUSTRY_MAPPINGS)) {
-    if (key.toLowerCase() === lower || key.toLowerCase().includes(lower) || lower.includes(key.toLowerCase())) {
-      return tags;
-    }
+  // Plural / singular fallback
+  const singular = normalized.endsWith('s') ? normalized.slice(0, -1) : normalized;
+  const plural = `${normalized}s`;
+
+  if (OSM_INDUSTRY_MAPPINGS[singular]) {
+    return OSM_INDUSTRY_MAPPINGS[singular];
+  }
+  if (OSM_INDUSTRY_MAPPINGS[plural]) {
+    return OSM_INDUSTRY_MAPPINGS[plural];
   }
 
-  // Fallback for custom industry terms (search as amenity, shop, or office)
+  // Exact fallback if custom industry provided
   return [
-    { key: 'amenity', value: lower.replace(/\s+/g, '_') },
-    { key: 'shop', value: lower.replace(/\s+/g, '_') },
-    { key: 'office', value: lower.replace(/\s+/g, '_') }
+    { key: 'amenity', value: normalized.replace(/\s+/g, '_') },
+    { key: 'shop', value: normalized.replace(/\s+/g, '_') },
+    { key: 'tourism', value: normalized.replace(/\s+/g, '_') }
   ];
 }
 
 /**
- * Builds Overpass QL filter strings for nodes, ways, and relations within a bounding box.
- * Format for bbox in Overpass: (south, west, north, east)
+ * Builds Overpass QL filter statements for an area or bounding box.
+ * Uses targeted `nwr` statements.
  */
 export function buildOverpassFilters(
   tags: OsmTagCondition[],
-  bbox: { south: number; west: number; north: number; east: number }
+  scope: { areaVariable?: string; bbox?: { south: number; west: number; north: number; east: number } }
 ): string {
-  const { south, west, north, east } = bbox;
-  const bboxStr = `(${south.toFixed(4)},${west.toFixed(4)},${north.toFixed(4)},${east.toFixed(4)})`;
+  const { areaVariable, bbox } = scope;
+  const targetScope = areaVariable
+    ? `(area.${areaVariable})`
+    : bbox
+    ? `(${bbox.south.toFixed(4)},${bbox.west.toFixed(4)},${bbox.north.toFixed(4)},${bbox.east.toFixed(4)})`
+    : '';
 
   const statements: string[] = [];
   for (const tag of tags) {
-    const tagFilter = tag.value 
-      ? `["${tag.key}"="${tag.value}"]` 
-      : `["${tag.key}"]`;
-    
-    statements.push(`node${tagFilter}${bboxStr};`);
-    statements.push(`way${tagFilter}${bboxStr};`);
-    statements.push(`relation${tagFilter}${bboxStr};`);
+    const tagFilter = tag.value ? `["${tag.key}"="${tag.value}"]` : `["${tag.key}"]`;
+    statements.push(`nwr${tagFilter}${targetScope};`);
   }
 
   return statements.join('\n  ');

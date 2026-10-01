@@ -5,6 +5,7 @@ import {
   Search, 
   Download, 
   ChevronDown, 
+  ChevronUp,
   FileSpreadsheet, 
   FileText, 
   X, 
@@ -20,12 +21,23 @@ import {
 } from 'lucide-react';
 import { 
   Lead, 
-  SearchSummary 
+  SearchSummary,
+  SearchStatusType,
+  ProviderStats,
+  PipelineBreakdown,
+  RejectedCandidateItem
 } from '@/types';
 
 interface LeadsTableProps {
   leads: Lead[];
   summary?: SearchSummary | null;
+  searchStatus?: SearchStatusType | null;
+  pipelineStats?: any;
+  providerStats?: ProviderStats | null;
+  pipelineBreakdown?: PipelineBreakdown | null;
+  rejectedCandidates?: RejectedCandidateItem[];
+  rejectionReasons?: any;
+  statusReason?: string | null;
   errorMessage?: string | null;
   onSelectLead: (lead: Lead) => void;
   onQuickAudit?: (lead: Lead) => void;
@@ -38,6 +50,13 @@ interface LeadsTableProps {
 export const LeadsTable: React.FC<LeadsTableProps> = ({
   leads,
   summary,
+  searchStatus,
+  pipelineStats,
+  providerStats,
+  pipelineBreakdown,
+  rejectedCandidates = [],
+  rejectionReasons,
+  statusReason,
   errorMessage,
   onSelectLead,
   onShowToast,
@@ -47,7 +66,41 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
   // In-results search query (filters within returned real records)
   const [searchQuery, setSearchQuery] = useState('');
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+  const [showAuditPanel, setShowAuditPanel] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+
+  // Multi-Source transparency logic
+  const activeProviders: string[] = [];
+  const osmCount = providerStats?.osm?.rawCount ?? pipelineStats?.rawOsmCount ?? 0;
+  const webCount = providerStats?.webSearch?.rawCount ?? providerStats?.web?.rawCount ?? 0;
+  const bpCount = providerStats?.businessProvider?.rawCount ?? 0;
+  const bpStatus = providerStats?.businessProvider?.status || 'DISABLED';
+  const dirCount = providerStats?.directory?.rawCount ?? 0;
+  const mergedUnique = pipelineBreakdown?.deduplicatedCount ?? pipelineStats?.deduplicatedCount ?? 0;
+  const enrichedCount = pipelineBreakdown?.phoneOrEmailCount ?? summary?.hasPhoneOrEmail ?? 0;
+  const requestedLimit = pipelineStats?.requestedLimit ?? 100;
+
+  if (osmCount > 0 && providerStats?.osm?.status !== 'FAILED') {
+    activeProviders.push('OSM');
+  }
+  if (webCount > 0 && (providerStats?.web?.status === 'COMPLETE' || providerStats?.webSearch?.status === 'COMPLETE')) {
+    activeProviders.push('Web Search');
+  }
+  if (bpCount > 0 && bpStatus === 'COMPLETE') {
+    activeProviders.push('Business Provider');
+  }
+  if (dirCount > 0 && providerStats?.directory?.status === 'COMPLETE') {
+    activeProviders.push('Directory');
+  }
+
+  const isMultiSource = activeProviders.length > 1;
+  const providerLabel = isMultiSource
+    ? `Multi-Source: ${activeProviders.join(' + ')}`
+    : activeProviders.length === 1 && activeProviders[0] === 'OSM'
+      ? 'Source: OpenStreetMap'
+      : activeProviders.length === 1
+        ? `Source: ${activeProviders[0]}`
+        : 'Source: OpenStreetMap';
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -295,6 +348,129 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
         </div>
       </div>
 
+      {/* 1.5 DIAGNOSTIC PIPELINE STATUS BAR (TRANSPARENCY) */}
+      {hasSearched && !isSearching && (pipelineStats || pipelineBreakdown) && (
+        <div className="px-5 py-2.5 bg-slate-900 text-slate-300 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-[11.5px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-white flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${searchStatus === 'COMPLETE' ? 'bg-teal-400' : 'bg-amber-400 animate-pulse'}`} />
+              {providerLabel}
+            </span>
+            <span className="text-slate-600">|</span>
+            <span>OSM: <strong className="text-white">{osmCount}</strong></span>
+            <span>•</span>
+            <span>Web Search: <strong className="text-white">{webCount}</strong></span>
+            <span>•</span>
+            <span>Business Provider: <strong className="text-white">{bpStatus === 'DISABLED' ? 'Disabled' : bpStatus === 'FAILED' ? 'Failed' : bpCount}</strong></span>
+            <span>•</span>
+            <span>Merged Unique: <strong className="text-white">{mergedUnique}</strong></span>
+            <span>•</span>
+            <span>Enriched: <strong className="text-white">{enrichedCount}</strong></span>
+            <span>•</span>
+            <span>Delivered: <strong className="text-teal-300 font-bold">{leads.length}</strong> of {requestedLimit} requested</span>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {rejectedCandidates && rejectedCandidates.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAuditPanel(!showAuditPanel)}
+                className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors flex items-center gap-1 cursor-pointer border border-slate-700"
+              >
+                <span>Rejections ({rejectedCandidates.length})</span>
+                {showAuditPanel ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              </button>
+            )}
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ${
+              searchStatus === 'COMPLETE' ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+            }`}>
+              Status: {searchStatus || 'COMPLETE'}
+            </span>
+            {statusReason && <span className="text-slate-400 italic text-[11px] max-w-md truncate hidden md:inline">({statusReason})</span>}
+          </div>
+        </div>
+      )}
+
+      {/* 1.6 COLLAPSIBLE REJECTIONS AUDIT PANEL (WHEN TOGGLED) */}
+      {showAuditPanel && rejectedCandidates && rejectedCandidates.length > 0 && (
+        <div className="bg-[#0F172A] text-slate-200 border-b border-slate-800 p-5 space-y-4 text-[12px] animate-fade-in">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-white text-[13px] uppercase tracking-wider flex items-center gap-2">
+              Pipeline Candidate Rejection Audit ({rejectedCandidates.length} evaluated)
+            </h4>
+            <button
+              onClick={() => setShowAuditPanel(false)}
+              className="text-slate-400 hover:text-white text-[11px]"
+            >
+              Close
+            </button>
+          </div>
+
+          {/* Rejection Reasons Summary Tags */}
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="px-2.5 py-1 rounded bg-amber-950/40 text-amber-300 border border-amber-800/50">
+              NO_CONTACT: <strong className="text-white">{rejectionReasons?.NO_CONTACT ?? 0}</strong>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-blue-950/40 text-blue-300 border border-blue-800/50">
+              HAS_WEBSITE: <strong className="text-white">{rejectionReasons?.HAS_WEBSITE ?? 0}</strong>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-rose-950/40 text-rose-300 border border-rose-800/50">
+              NO_WEBSITE: <strong className="text-white">{rejectionReasons?.NO_WEBSITE ?? 0}</strong>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-purple-950/40 text-purple-300 border border-purple-800/50">
+              WEBSITE_UNREACHABLE: <strong className="text-white">{rejectionReasons?.WEBSITE_UNREACHABLE ?? 0}</strong>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+              OUTSIDE_LOCATION: <strong className="text-white">{rejectionReasons?.OUTSIDE_LOCATION ?? 0}</strong>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+              DUPLICATE: <strong className="text-white">{rejectionReasons?.DUPLICATE ?? 0}</strong>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+              MISSING_NAME: <strong className="text-white">{rejectionReasons?.MISSING_NAME ?? 0}</strong>
+            </span>
+            <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+              OTHER: <strong className="text-white">{rejectionReasons?.OTHER ?? 0}</strong>
+            </span>
+          </div>
+
+          {/* Candidates table */}
+          <div className="max-h-60 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/50">
+            <table className="w-full text-left text-[11.5px] border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 bg-slate-900 text-slate-400 font-semibold uppercase text-[10.5px]">
+                  <th className="px-3 py-2">Business</th>
+                  <th className="px-3 py-2">Phone</th>
+                  <th className="px-3 py-2">Email</th>
+                  <th className="px-3 py-2">Website</th>
+                  <th className="px-3 py-2">Rejection Reason</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {rejectedCandidates.map((c, i) => (
+                  <tr key={i} className="hover:bg-slate-900/60">
+                    <td className="px-3 py-2 font-medium text-white">{c.name}</td>
+                    <td className="px-3 py-2 text-slate-300">{c.phone || <span className="text-slate-600">None</span>}</td>
+                    <td className="px-3 py-2 text-slate-300">{c.email || <span className="text-slate-600">None</span>}</td>
+                    <td className="px-3 py-2 text-slate-300">{c.websiteUrl ? c.websiteUrl.replace(/^https?:\/\//, '') : <span className="text-slate-600">None</span>}</td>
+                    <td className="px-3 py-2 font-semibold">
+                      <span className={`px-2 py-0.5 rounded text-[10px] ${
+                        c.rejectionReason === 'NO_CONTACT' ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60' :
+                        c.rejectionReason === 'HAS_WEBSITE' ? 'bg-blue-950/60 text-blue-300 border border-blue-800/60' :
+                        c.rejectionReason === 'NO_WEBSITE' ? 'bg-rose-950/60 text-rose-300 border border-rose-800/60' :
+                        'bg-slate-800 text-slate-300'
+                      }`}>
+                        {c.rejectionReason}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* 2. DYNAMIC REAL SUMMARY BAR (SECTION 10) */}
       {hasSearched && !isSearching && leads.length > 0 && (
         <div className="px-5 py-3 bg-[#F8FAFC] border-b border-[#E2E8F0] flex flex-wrap items-center gap-3 text-[12px]">
@@ -393,16 +569,189 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
 
         {/* State D: Search Finished, Zero Results */}
         {hasSearched && !isSearching && !errorMessage && leads.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 px-4 text-center animate-fade-in">
-            <div className="h-12 w-12 rounded-2xl bg-[#F8FAFC] flex items-center justify-center text-[#64748B] mb-3.5 border border-[#E2E8F0]">
-              <AlertCircle className="h-5 w-5 text-[#94A3B8]" />
+          <div className="p-6 space-y-6 animate-fade-in">
+            <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
+              <div className="h-12 w-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-600 mb-3 border border-amber-200">
+                <AlertCircle className="h-6 w-6 text-amber-600" />
+              </div>
+              <h3 className="text-[16px] font-bold text-[#0F172A]">
+                0 Qualified Leads Delivered
+              </h3>
+              <p className="text-[13px] text-[#64748B] max-w-lg mt-1 leading-relaxed">
+                The pipeline discovered {pipelineBreakdown?.rawDiscoveredCount || pipelineStats?.rawOsmCount || 0} candidate businesses, but none satisfied the required filter criteria. Complete rejection breakdown is detailed below.
+              </p>
             </div>
-            <h3 className="text-[16px] font-bold text-[#0F172A]">
-              No businesses found for these criteria.
-            </h3>
-            <p className="text-[13px] text-[#64748B] max-w-sm mt-1.5 leading-relaxed">
-              Try changing your search criteria.
-            </p>
+
+            {/* Rejection Breakdown Counters (11 items) */}
+            <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
+              <h4 className="text-[12px] font-bold text-[#0F172A] uppercase tracking-wider mb-3">
+                Pipeline Execution Breakdown
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 text-[11.5px]">
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Raw Discovered</div>
+                  <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.rawDiscoveredCount ?? pipelineStats?.rawOsmCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Normalized</div>
+                  <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.normalizedCount ?? (pipelineStats?.rawOsmCount ?? 0)}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Location Verified</div>
+                  <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.inCityBoundsCount ?? pipelineStats?.inCityBoundsCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Deduplicated</div>
+                  <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.deduplicatedCount ?? pipelineStats?.deduplicatedCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Phone Available</div>
+                  <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.phoneCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Email Available</div>
+                  <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.emailCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Phone OR Email</div>
+                  <div className="text-[15px] font-bold text-blue-700">{pipelineBreakdown?.phoneOrEmailCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Website Available</div>
+                  <div className="text-[15px] font-bold text-emerald-700">{pipelineBreakdown?.websiteAvailableCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Verified No Website</div>
+                  <div className="text-[15px] font-bold text-rose-700">{pipelineBreakdown?.websiteUnavailableCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Website Unreachable</div>
+                  <div className="text-[15px] font-bold text-amber-700">{pipelineBreakdown?.websiteUnreachableCount ?? 0}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-teal-200 col-span-2 sm:col-span-1">
+                  <div className="text-teal-700 text-[10.5px] font-semibold">Final Qualified</div>
+                  <div className="text-[15px] font-bold text-teal-800">{pipelineBreakdown?.finalQualifiedCount ?? leads.length}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Rejection Reasons Summary Tags */}
+            <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
+              <h4 className="text-[12px] font-bold text-[#0F172A] uppercase tracking-wider mb-2.5">
+                Exact Rejection Reasons
+              </h4>
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="px-2.5 py-1 rounded-md bg-amber-50 text-amber-800 border border-amber-200 font-medium">
+                  NO_CONTACT: <strong>{rejectionReasons?.NO_CONTACT ?? 0}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-800 border border-blue-200 font-medium">
+                  HAS_WEBSITE: <strong>{rejectionReasons?.HAS_WEBSITE ?? 0}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-rose-50 text-rose-800 border border-rose-200 font-medium">
+                  NO_WEBSITE: <strong>{rejectionReasons?.NO_WEBSITE ?? 0}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-purple-50 text-purple-800 border border-purple-200 font-medium">
+                  WEBSITE_UNREACHABLE: <strong>{rejectionReasons?.WEBSITE_UNREACHABLE ?? 0}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                  OUTSIDE_LOCATION: <strong>{rejectionReasons?.OUTSIDE_LOCATION ?? 0}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                  DUPLICATE: <strong>{rejectionReasons?.DUPLICATE ?? 0}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                  MISSING_NAME: <strong>{rejectionReasons?.MISSING_NAME ?? 0}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                  OTHER: <strong>{rejectionReasons?.OTHER ?? 0}</strong>
+                </span>
+              </div>
+            </div>
+
+            {/* Discovered Candidates Rejection Inspection Table */}
+            {rejectedCandidates && rejectedCandidates.length > 0 && (
+              <div className="border border-[#E2E8F0] rounded-xl overflow-hidden">
+                <div className="bg-[#F8FAFC] px-4 py-2.5 border-b border-[#E2E8F0] flex items-center justify-between">
+                  <h4 className="text-[12px] font-bold text-[#0F172A] uppercase tracking-wider">
+                    Discovered Candidates &amp; Rejection Audit ({rejectedCandidates.length})
+                  </h4>
+                  <span className="text-[11px] text-[#64748B]">All candidates evaluated by LeadPilot Pipeline</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[12px] border-collapse">
+                    <thead>
+                      <tr className="bg-[#F8FAFC] text-[11px] font-semibold text-[#64748B] uppercase tracking-wider border-b border-[#E2E8F0]">
+                        <th className="px-4 py-2.5">Candidate Name</th>
+                        <th className="px-3 py-2.5">Category</th>
+                        <th className="px-3 py-2.5">Location</th>
+                        <th className="px-3 py-2.5">Phone</th>
+                        <th className="px-3 py-2.5">Email</th>
+                        <th className="px-3 py-2.5">Website Status</th>
+                        <th className="px-4 py-2.5">Rejection Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F1F5F9]">
+                      {rejectedCandidates.map((candidate, idx) => (
+                        <tr key={idx} className="hover:bg-[#F8FAFC] transition-colors">
+                          <td className="px-4 py-2.5 font-semibold text-[#0F172A]">
+                            {candidate.name}
+                          </td>
+                          <td className="px-3 py-2.5 text-[#475569]">
+                            {candidate.category || 'Restaurant'}
+                          </td>
+                          <td className="px-3 py-2.5 text-[#475569]">
+                            {candidate.city ? `${candidate.city}${candidate.state ? `, ${candidate.state}` : ''}` : 'Greater Noida, Uttar Pradesh'}
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-[11px]">
+                            {candidate.phone ? (
+                              <span className="text-emerald-700 font-medium">{candidate.phone}</span>
+                            ) : (
+                              <span className="text-[#94A3B8]">None</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-[11px]">
+                            {candidate.email ? (
+                              <span className="text-blue-700 font-medium">{candidate.email}</span>
+                            ) : (
+                              <span className="text-[#94A3B8]">None</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-[11px]">
+                            {candidate.websiteUrl ? (
+                              <span className="text-emerald-700 font-medium truncate max-w-[150px] inline-block" title={candidate.websiteUrl}>
+                                {candidate.websiteUrl.replace(/^https?:\/\//, '')}
+                              </span>
+                            ) : (
+                              <span className="text-rose-600 font-medium">Verified No Website</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10.5px] font-bold tracking-wide uppercase ${
+                              candidate.rejectionReason === 'NO_CONTACT'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : candidate.rejectionReason === 'HAS_WEBSITE'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : candidate.rejectionReason === 'NO_WEBSITE'
+                                ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                : candidate.rejectionReason === 'WEBSITE_UNREACHABLE'
+                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}>
+                              {candidate.rejectionReason}
+                            </span>
+                            {candidate.rejectionDetails && (
+                              <div className="text-[10px] text-[#64748B] mt-0.5 max-w-[200px] truncate" title={candidate.rejectionDetails}>
+                                {candidate.rejectionDetails}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -551,11 +900,33 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                       )}
                     </td>
 
-                    {/* 9. Source */}
+                    {/* 9. Source (Multi-Source Provenance) */}
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-medium bg-[#F1F5F9] text-[#475569] border border-[#E2E8F0]">
-                        {lead.source || 'Google Places'}
-                      </span>
+                      <div className="flex flex-wrap gap-1 max-w-[140px]">
+                        {((lead as any).sources && (lead as any).sources.length > 0
+                          ? (lead as any).sources
+                          : [lead.source || 'OpenStreetMap']
+                        ).map((s: string, idx: number) => {
+                          const isOsm = s === 'osm' || s === 'OpenStreetMap';
+                          const isWeb = s === 'web_search' || s === 'Public Web Discovery Engine';
+                          const isDir = s === 'directory' || s === 'Public Business Directory Provider';
+                          const label = isOsm ? 'OSM' : isWeb ? 'Web' : isDir ? 'Directory' : s;
+                          const color = isOsm
+                            ? 'bg-sky-50 text-sky-700 border-sky-200'
+                            : isWeb
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-purple-50 text-purple-700 border-purple-200';
+
+                          return (
+                            <span
+                              key={idx}
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${color}`}
+                            >
+                              {label}
+                            </span>
+                          );
+                        })}
+                      </div>
                     </td>
 
                     {/* 10. Actions */}

@@ -32,6 +32,7 @@ export interface LeadFilterCriteria {
 interface LeadSearchCardProps {
   initialCriteria?: Partial<LeadFilterCriteria>;
   isSearchingExternal?: boolean;
+  liveProgressLog?: { actorId: string; stepName: string; message: string; count?: number; timestamp: string }[];
   onSearchStart?: () => void;
   onSearchSubmit?: (criteria: LeadFilterCriteria) => void;
   onViewLeads?: () => void;
@@ -40,6 +41,7 @@ interface LeadSearchCardProps {
 export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
   initialCriteria,
   isSearchingExternal = false,
+  liveProgressLog = [],
   onSearchStart,
   onSearchSubmit,
   onViewLeads,
@@ -441,48 +443,75 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
         </div>
       </form>
 
-      {/* Progress State Feedback (Section 14) */}
+      {/* Progress State Feedback (Real-World Actor Engine Observability) */}
       {isSearching && (
         <div className="mt-4 p-4 rounded-xl border border-teal-200/80 bg-teal-50/50 animate-fade-in space-y-2.5">
           <div className="flex items-center justify-between text-[12.5px]">
             <span className="font-semibold text-[#0F172A] flex items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-700" />
-              <span>{steps[currentStepIndex].label}</span>
+              <span>
+                {liveProgressLog.length > 0
+                  ? liveProgressLog[liveProgressLog.length - 1].message
+                  : steps[currentStepIndex].label}
+              </span>
             </span>
             <span className="text-[11.5px] text-teal-800 font-semibold">
-              Step {currentStepIndex + 1} of 5
+              {liveProgressLog.length > 0
+                ? `${liveProgressLog.length} Engine Steps Completed`
+                : `Step ${currentStepIndex + 1} of 5`}
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11.5px]">
-            {steps.map((st, idx) => {
-              const isPast = idx < currentStepIndex;
-              const isCurrent = idx === currentStepIndex;
-
-              return (
+          {liveProgressLog.length > 0 ? (
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {liveProgressLog.slice(-5).map((log, idx) => (
                 <div
-                  key={st.label}
-                  className={`p-2 rounded-lg border transition-all ${
-                    isPast
-                      ? 'bg-white border-teal-300 text-teal-900 font-medium'
-                      : isCurrent
-                      ? 'bg-teal-100/70 border-teal-400 text-teal-950 font-bold ring-1 ring-teal-400/50'
-                      : 'bg-white/60 border-slate-200 text-slate-400'
-                  }`}
+                  key={`${log.timestamp}-${idx}`}
+                  className="flex items-center justify-between text-[11.5px] p-2 rounded-lg bg-white border border-teal-200 shadow-2xs"
                 >
-                  <div className="flex items-center gap-1.5">
-                    {isPast ? (
-                      <Check className="h-3 w-3 text-teal-700" />
-                    ) : (
-                      <span className="h-1.5 w-1.5 rounded-full bg-teal-600" />
-                    )}
-                    <span className="truncate text-[11px]">{st.label.replace('...', '')}</span>
+                  <div className="flex items-center gap-2">
+                    <Check className="h-3 w-3 text-teal-600 shrink-0" />
+                    <span className="font-medium text-[#0F172A]">{log.message}</span>
                   </div>
-                  <p className="text-[10px] text-[#64748B] mt-0.5 truncate">{st.desc}</p>
+                  {log.count !== undefined && (
+                    <span className="px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 text-[10px] font-bold">
+                      {log.count} records
+                    </span>
+                  )}
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11.5px]">
+              {steps.map((st, idx) => {
+                const isPast = idx < currentStepIndex;
+                const isCurrent = idx === currentStepIndex;
+
+                return (
+                  <div
+                    key={st.label}
+                    className={`p-2 rounded-lg border transition-all ${
+                      isPast
+                        ? 'bg-white border-teal-300 text-teal-900 font-medium'
+                        : isCurrent
+                        ? 'bg-teal-100/70 border-teal-400 text-teal-950 font-bold ring-1 ring-teal-400/50'
+                        : 'bg-white/60 border-slate-200 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {isPast ? (
+                        <Check className="h-3 w-3 text-teal-700" />
+                      ) : (
+                        <span className="h-1.5 w-1.5 rounded-full bg-teal-600" />
+                      )}
+                      <span className="truncate text-[11px]">{st.label.replace('...', '')}</span>
+                    </div>
+                    <p className="text-[10px] text-[#64748B] mt-0.5 truncate">{st.desc}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

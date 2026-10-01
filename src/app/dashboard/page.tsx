@@ -21,7 +21,7 @@ import { DemoWebsitesView } from '@/components/views/DemoWebsitesView';
 import { SettingsView } from '@/components/views/SettingsView';
 
 import { mockLeads, mockMetricSummary } from '@/data/mockData';
-import { NavTab, Lead, ToastMessage, ContactFilter, WebsiteFilter, NumberOfLeads, SearchSummary } from '@/types';
+import { NavTab, Lead, ToastMessage, ContactFilter, WebsiteFilter, NumberOfLeads, SearchSummary, SearchStatusType, PipelineStats, ProviderStats, PipelineBreakdown, RejectedCandidateItem } from '@/types';
 import { LeadFilterCriteria } from '@/components/dashboard/LeadSearchCard';
 
 export default function DashboardPage() {
@@ -31,6 +31,13 @@ export default function DashboardPage() {
   // Real Leads state (No mock data in real search flow)
   const [leads, setLeads] = useState<Lead[]>([]);
   const [searchSummary, setSearchSummary] = useState<SearchSummary | null>(null);
+  const [searchStatus, setSearchStatus] = useState<SearchStatusType | null>(null);
+  const [pipelineStats, setPipelineStats] = useState<PipelineStats | null>(null);
+  const [providerStats, setProviderStats] = useState<ProviderStats | null>(null);
+  const [pipelineBreakdown, setPipelineBreakdown] = useState<PipelineBreakdown | null>(null);
+  const [rejectedCandidates, setRejectedCandidates] = useState<RejectedCandidateItem[]>([]);
+  const [rejectionReasons, setRejectionReasons] = useState<any>(null);
+  const [statusReason, setStatusReason] = useState<string | null>(null);
   const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [auditTargetLead, setAuditTargetLead] = useState<Lead | null>(null);
@@ -45,6 +52,7 @@ export default function DashboardPage() {
   // Search lifecycle states
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [liveProgressLog, setLiveProgressLog] = useState<any[]>([]);
 
   // Toasts state
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -92,11 +100,13 @@ export default function DashboardPage() {
   const handleLeadSearchStart = () => {
     setIsSearching(true);
     setSearchErrorMessage(null);
+    setLiveProgressLog([]);
   };
 
   const handleLeadSearchSubmit = async (criteria: LeadFilterCriteria) => {
     setIsSearching(true);
     setSearchErrorMessage(null);
+    setLiveProgressLog([]);
 
     try {
       const response = await fetch('/api/leads/search', {
@@ -115,41 +125,120 @@ export default function DashboardPage() {
         }),
       });
 
-      const data = await response.json();
+      const initialData = await response.json();
 
-      setIsSearching(false);
-      setHasSearched(true);
-
-      if (data.success) {
-        setLeads(data.leads || []);
-        setSearchSummary(data.summary || null);
-        setSearchErrorMessage(null);
-
-        if (data.leads && data.leads.length > 0) {
-          addToast(
-            'Search Complete',
-            `Discovered ${data.leads.length} real businesses in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
-            'success'
-          );
-        } else {
-          addToast(
-            'Search Complete',
-            `No matching businesses found in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
-            'info'
-          );
-        }
-      } else {
+      if (!initialData.success && initialData.status === 'FAILED') {
+        setIsSearching(false);
+        setHasSearched(true);
         setLeads([]);
         setSearchSummary(null);
-        setSearchErrorMessage(data.error || 'Failed to fetch businesses.');
-        addToast('Search Notice', data.error || 'Failed to fetch businesses.', 'warning');
+        setSearchStatus('FAILED');
+        setPipelineStats(null);
+        setStatusReason(initialData.error || 'Failed to dispatch search.');
+        setSearchErrorMessage(initialData.error || 'Failed to dispatch search.');
+        addToast('Search Notice', initialData.error || 'Failed to dispatch search.', 'warning');
+        return;
+      }
+
+      // If returned synchronously directly
+      if (initialData.leads) {
+        setIsSearching(false);
+        setHasSearched(true);
+        setLeads(initialData.leads || []);
+        setSearchSummary(initialData.summary || null);
+        setSearchStatus(initialData.searchStatus || 'COMPLETE');
+        setPipelineStats(initialData.pipelineStats || null);
+        setProviderStats(initialData.providerStats || null);
+        setPipelineBreakdown(initialData.pipelineBreakdown || null);
+        setRejectedCandidates(initialData.rejectedCandidates || []);
+        setRejectionReasons(initialData.rejectionReasons || null);
+        setStatusReason(initialData.statusReason || null);
+        setSearchErrorMessage(null);
+        return;
+      }
+
+      const jobId = initialData.jobId;
+      if (!jobId) {
+        throw new Error('No Job ID received from search engine.');
+      }
+
+      // Poll progress every 600ms
+      let isDone = false;
+      let attempts = 0;
+      const maxAttempts = 150; // up to 90s
+
+      while (!isDone && attempts < maxAttempts) {
+        attempts++;
+        await new Promise((r) => setTimeout(r, 600));
+
+        const progRes = await fetch(`/api/leads/search/${jobId}/progress`);
+        if (!progRes.ok) continue;
+
+        const progData = await progRes.json();
+        if (progData.progressLog) {
+          setLiveProgressLog(progData.progressLog);
+        }
+
+        if (progData.status === 'COMPLETED' || progData.status === 'FAILED') {
+          isDone = true;
+
+          const resultsRes = await fetch(`/api/leads/search/${jobId}/results`);
+          const resultsData = await resultsRes.json();
+
+          setIsSearching(false);
+          setHasSearched(true);
+
+          if (resultsData.success) {
+            setLeads(resultsData.leads || []);
+            setSearchSummary(resultsData.summary || null);
+            setSearchStatus(resultsData.searchStatus || (resultsData.leads?.length > 0 ? 'COMPLETE' : 'NO_RESULTS'));
+            setPipelineStats(resultsData.pipelineStats || null);
+            setProviderStats(resultsData.providerStats || null);
+            setPipelineBreakdown(resultsData.pipelineBreakdown || null);
+            setRejectedCandidates(resultsData.rejectedCandidates || []);
+            setRejectionReasons(resultsData.rejectionReasons || null);
+            setStatusReason(resultsData.statusReason || null);
+            setSearchErrorMessage(null);
+
+            if (resultsData.leads && resultsData.leads.length > 0) {
+              const statusText = resultsData.searchStatus === 'PARTIAL' ? ' [Partial - Source Limit]' : '';
+              addToast(
+                `Search Complete${statusText}`,
+                `Discovered ${resultsData.leads.length} real businesses in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
+                resultsData.searchStatus === 'PARTIAL' ? 'warning' : 'success'
+              );
+            } else {
+              addToast(
+                'Search Complete',
+                `No matching businesses found in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
+                'info'
+              );
+            }
+          } else {
+            setLeads([]);
+            setSearchSummary(null);
+            setSearchStatus('FAILED');
+            setPipelineStats(null);
+            setStatusReason(resultsData.error || 'Job failed.');
+            setSearchErrorMessage(resultsData.error || 'Job failed.');
+            addToast('Search Notice', resultsData.error || 'Job failed.', 'warning');
+          }
+          break;
+        }
+      }
+
+      if (!isDone) {
+        throw new Error('Search request timed out. Please try again.');
       }
     } catch (err: any) {
       setIsSearching(false);
       setHasSearched(true);
       setLeads([]);
       setSearchSummary(null);
-      const msg = err.message || 'Unable to connect to Google Places search API.';
+      setSearchStatus('FAILED');
+      setPipelineStats(null);
+      setStatusReason(err.message || 'Connection failure');
+      const msg = err.message || 'Unable to connect to business search service.';
       setSearchErrorMessage(msg);
       addToast('Search Error', msg, 'error');
     }
@@ -190,6 +279,7 @@ export default function DashboardPage() {
               {/* Search Configuration Section */}
               <LeadSearchCard
                 isSearchingExternal={isSearching}
+                liveProgressLog={liveProgressLog}
                 onSearchStart={handleLeadSearchStart}
                 onSearchSubmit={handleLeadSearchSubmit}
                 onViewLeads={handleScrollToLeads}
@@ -199,6 +289,13 @@ export default function DashboardPage() {
               <LeadsTable
                 leads={leads}
                 summary={searchSummary}
+                searchStatus={searchStatus}
+                pipelineStats={pipelineStats}
+                providerStats={providerStats}
+                pipelineBreakdown={pipelineBreakdown}
+                rejectedCandidates={rejectedCandidates}
+                rejectionReasons={rejectionReasons}
+                statusReason={statusReason}
                 errorMessage={searchErrorMessage}
                 onSelectLead={setSelectedLead}
                 onQuickAudit={handleOpenQuickAudit}
@@ -225,6 +322,13 @@ export default function DashboardPage() {
               <LeadsTable
                 leads={leads}
                 summary={searchSummary}
+                searchStatus={searchStatus}
+                pipelineStats={pipelineStats}
+                providerStats={providerStats}
+                pipelineBreakdown={pipelineBreakdown}
+                rejectedCandidates={rejectedCandidates}
+                rejectionReasons={rejectionReasons}
+                statusReason={statusReason}
                 errorMessage={searchErrorMessage}
                 onSelectLead={setSelectedLead}
                 onQuickAudit={handleOpenQuickAudit}

@@ -12,9 +12,11 @@ import {
 
 interface UnifiedAuthPageProps {
   initialMode?: 'signup' | 'signin';
+  onClose?: () => void;
+  onSuccess?: () => void;
 }
 
-export function UnifiedAuthPage({ initialMode = 'signin' }: UnifiedAuthPageProps) {
+export function UnifiedAuthPage({ initialMode = 'signin', onClose, onSuccess }: UnifiedAuthPageProps) {
   const router = useRouter();
   const [mode, setMode] = useState<'signup' | 'signin'>(initialMode);
 
@@ -45,7 +47,11 @@ export function UnifiedAuthPage({ initialMode = 'signin' }: UnifiedAuthPageProps
   };
 
   const handleClose = () => {
-    router.push('/');
+    if (onClose) {
+      onClose();
+    } else {
+      router.push('/');
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -54,7 +60,11 @@ export function UnifiedAuthPage({ initialMode = 'signin' }: UnifiedAuthPageProps
 
     setTimeout(() => {
       setIsLoading(false);
-      router.push('/dashboard');
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        router.push('/dashboard');
+      }
     }, 450);
   };
 
@@ -62,8 +72,12 @@ export function UnifiedAuthPage({ initialMode = 'signin' }: UnifiedAuthPageProps
     setIsLoading(true);
     setTimeout(() => {
       setIsLoading(false);
-      router.push('/dashboard');
-    }, 400);
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        router.push('/dashboard');
+      }
+    }, 450);
   };
 
   return (

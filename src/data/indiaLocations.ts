@@ -94,7 +94,7 @@ export const INDIAN_STATES_AND_UTS: IndianState[] = [
     name: 'Karnataka',
     type: 'State',
     cities: [
-      'Bengaluru', 'Mysuru', 'Hubballi-Dharwad', 'Mangaluru', 'Belagavi', 
+      'Bengaluru', 'Bangalore', 'Mysuru', 'Hubballi-Dharwad', 'Mangaluru', 'Belagavi', 
       'Kalaburagi', 'Davanagere', 'Ballari', 'Vijayapura', 'Shivamogga', 
       'Tumakuru', 'Raichur', 'Bidar', 'Hosapete', 'Udupi', 'Hassan'
     ]
@@ -305,3 +305,89 @@ export function isValidIndianState(stateName: string): boolean {
     s => s.name.toLowerCase() === stateName.toLowerCase().trim()
   );
 }
+
+export function isValidCityForState(stateName: string, cityName?: string): boolean {
+  if (!cityName || cityName.trim() === '' || cityName.toLowerCase() === 'all cities in this state') {
+    return true;
+  }
+  const cleanState = stateName.toLowerCase().trim();
+  const cleanCity = cityName.toLowerCase().trim();
+
+  const stateObj = INDIAN_STATES_AND_UTS.find(
+    s => s.name.toLowerCase() === cleanState
+  );
+  if (!stateObj) return false;
+
+  return stateObj.cities.some(c => {
+    const cLow = c.toLowerCase();
+    return cLow === cleanCity || cLow.startsWith(cleanCity) || cleanCity.startsWith(cLow);
+  });
+}
+
+export const COMMON_CITY_ALIASES: Record<string, string> = {
+  'bangalore': 'Bengaluru',
+  'calcutta': 'Kolkata',
+  'bombay': 'Mumbai',
+  'madras': 'Chennai',
+  'gurgaon': 'Gurugram',
+  'trivandrum': 'Thiruvananthapuram',
+  'cochin': 'Kochi',
+  'pondicherry': 'Puducherry',
+  'baroda': 'Vadodara',
+  'poona': 'Pune',
+  'allahabad': 'Prayagraj (Allahabad)',
+  'banaras': 'Varanasi',
+  'faizabad': 'Ayodhya (Faizabad)',
+  'aurangabad': 'Chhatrapati Sambhajinagar (Aurangabad)',
+};
+
+export function validateStateAndCity(
+  stateName: string,
+  cityName?: string
+): { valid: boolean; error?: string; matchedState?: string; matchedCity?: string } {
+  if (!stateName || !stateName.trim()) {
+    return { valid: false, error: 'State is required.' };
+  }
+
+  const cleanState = stateName.trim();
+  const stateObj = INDIAN_STATES_AND_UTS.find(
+    s => s.name.toLowerCase() === cleanState.toLowerCase()
+  );
+
+  if (!stateObj) {
+    return {
+      valid: false,
+      error: `Invalid Indian State or Union Territory: "${stateName}". Please select a valid state in India.`
+    };
+  }
+
+  if (cityName && cityName.trim() && cityName.toLowerCase() !== 'all cities in this state') {
+    const rawClean = cityName.trim();
+    const aliasResolved = COMMON_CITY_ALIASES[rawClean.toLowerCase()] || rawClean;
+    const cleanCity = aliasResolved;
+    const cityMatch = stateObj.cities.find(
+      c => c.toLowerCase() === rawClean.toLowerCase() ||
+           c.toLowerCase() === cleanCity.toLowerCase() ||
+           c.toLowerCase().startsWith(cleanCity.toLowerCase()) ||
+           cleanCity.toLowerCase().startsWith(c.toLowerCase())
+    );
+
+    if (!cityMatch) {
+      // Find if this city belongs to another state to give a helpful and accurate error
+      const otherState = INDIAN_STATES_AND_UTS.find(s =>
+        s.cities.some(c => c.toLowerCase() === rawClean.toLowerCase() || c.toLowerCase() === cleanCity.toLowerCase())
+      );
+
+      const errorMsg = otherState
+        ? `Location mismatch: City "${rawClean}" belongs to "${otherState.name}", not "${stateObj.name}". Please select the correct state.`
+        : `City "${rawClean}" is not a recognized city in "${stateObj.name}". Please select a valid city.`;
+
+      return { valid: false, error: errorMsg };
+    }
+
+    return { valid: true, matchedState: stateObj.name, matchedCity: cityMatch };
+  }
+
+  return { valid: true, matchedState: stateObj.name };
+}
+
