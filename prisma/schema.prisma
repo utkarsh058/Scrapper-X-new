@@ -1,0 +1,305 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Business {
+  id               String   @id @default(cuid())
+  name             String
+  legalName        String?
+  category         String
+  industry         String
+  address          String?
+  city             String?
+  state            String?
+  country          String   @default("India")
+  postcode         String?
+  latitude         Float?
+  longitude        Float?
+  phone            String?
+  email            String?
+  websiteUrl       String?
+  rating           Float?
+  reviewCount      Int?
+  businessStatus   String   @default("OPERATIONAL")
+  opportunityScore Int      @default(0)
+  status           String   @default("New")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  sources          BusinessSource[]
+  contacts         Contact[]
+  websites         Website[]
+  audits           WebsiteAudit[]
+  signals          MarketingSignal[]
+  verifications    VerificationResult[]
+  scores           LeadScore[]
+  evidence         LeadEvidence[]
+  outreach         Outreach[]
+  outreachLogs     OutreachAuditLog[]
+
+  @@index([city, state])
+  @@index([industry])
+  @@index([opportunityScore])
+}
+
+model BusinessSource {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  provider    String   // e.g. "google_places", "openstreetmap"
+  sourceId    String   // provider's unique ID e.g. "ChIJ..." or "osm:node:123"
+  sourceUrl   String?
+  rawPayload  String?  // JSON string of original provider response
+  collectedAt DateTime @default(now())
+
+  @@index([businessId])
+  @@index([provider, sourceId])
+}
+
+model Contact {
+  id                 String   @id @default(cuid())
+  businessId         String
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name               String?
+  role               String?
+  type               String   @default("GENERIC_BUSINESS") // "GENERIC_BUSINESS" | "PERSONAL_DECISION_MAKER"
+  email              String?
+  phone              String?
+  linkedin           String?
+  verificationStatus String   @default("UNVERIFIED") // "UNVERIFIED" | "VERIFIED" | "RISKY" | "INVALID"
+  sourceUrl          String?
+  createdAt          DateTime @default(now())
+
+  verifications      VerificationResult[]
+
+  @@index([businessId])
+}
+
+model Website {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  url           String
+  domain        String
+  isHttps       Boolean  @default(false)
+  httpStatus    Int?
+  status        String   @default("Working") // "Working" | "Needs Improvement" | "Unreachable" | "No Website"
+  lastCheckedAt DateTime @default(now())
+
+  audits        WebsiteAudit[]
+
+  @@index([businessId])
+  @@index([domain])
+}
+
+model WebsiteAudit {
+  id                  String   @id @default(cuid())
+  businessId          String
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  websiteId           String?
+  website             Website? @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  url                 String
+  status              String   @default("Working")
+  performanceScore    Int?     // Real Lighthouse / PageSpeed score
+  accessibilityScore  Int?
+  bestPracticesScore  Int?
+  seoScore            Int?
+  responseTimeMs      Int?
+  hasMobileViewport   Boolean  @default(false)
+  hasContactForm      Boolean  @default(false)
+  hasBookingCta       Boolean  @default(false)
+  hasPhoneCta         Boolean  @default(false)
+  hasWhatsappLink     Boolean  @default(false)
+  detectedIssues      String   // JSON array of strings
+  rawAuditPayload     String?  // JSON of PageSpeed / inspection payload
+  auditedAt           DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model MarketingSignal {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  signalType  String   // "GOOGLE_RATING", "REVIEW_COUNT", "SOCIAL_PRESENCE", "WEBSITE_EXISTENCE"
+  name        String
+  value       String
+  sourceUrl   String?
+  confidence  Float    @default(1.0)
+  observedAt  DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model VerificationResult {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contactId   String?
+  contact     Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  targetType  String   // "EMAIL" | "PHONE" | "WEBSITE"
+  targetValue String
+  provider    String   // "dns_mx", "libphonenumber", "zerobounce"
+  status      String   // "DELIVERABLE" | "UNDELIVERABLE" | "RISKY" | "VALID" | "INVALID"
+  details     String?  // JSON string
+  confidence  Float    @default(1.0)
+  verifiedAt  DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model LeadScore {
+  id                  String   @id @default(cuid())
+  businessId          String
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  opportunityScore    Int      @default(0)
+  fitScore            Int      @default(0)
+  needScore           Int      @default(0)
+  contactabilityScore Int      @default(0)
+  evidenceScore       Int      @default(0)
+  reasons             String   // JSON array of explainable strings
+  calculatedAt        DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model LeadEvidence {
+  id           String   @id @default(cuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  evidenceType String   // "TECHNICAL_AUDIT", "SEO_AUDIT", "CONVERSION_AUDIT", "CONTACT_VERIFICATION", "MARKETING_SIGNAL"
+  claim        String
+  sourceUrl    String?
+  snippet      String?
+  confidence   Float    @default(1.0)
+  observedAt   DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model Outreach {
+  id                 String    @id @default(cuid())
+  businessId         String
+  business           Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  campaignId         String?
+  campaign           Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  channel            String    @default("EMAIL") // "EMAIL" | "SMS" | "WHATSAPP"
+  recipient          String    // email address or E.164 phone
+  subject            String?
+  message            String
+  status             String    @default("PENDING") // "PENDING" | "QUEUED" | "SENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "CANCELLED" | "BOUNCED" | "SUPPRESSED"
+  provider           String?   // "resend" | "sendgrid" | "twilio" | "whatsapp_cloud"
+  providerMessageId  String?
+  verificationStatus String?
+  evidenceUsed       String?   // JSON array of evidence claims/ids
+  errorCode          String?
+  errorMessage       String?
+  excelSyncStatus    String?   @default("PENDING") // "PENDING" | "SYNCED" | "FAILED"
+  excelSyncError     String?
+  sentAt             DateTime?
+  deliveredAt        DateTime?
+  readAt             DateTime?
+  failedAt           DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  auditLogs          OutreachAuditLog[]
+
+  @@index([businessId])
+  @@index([campaignId])
+  @@index([channel, recipient])
+  @@index([status])
+}
+
+model Campaign {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  status      String     @default("ACTIVE") // "ACTIVE" | "PAUSED" | "COMPLETED"
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  outreaches  Outreach[]
+}
+
+model SuppressionList {
+  id        String   @id @default(cuid())
+  contact   String   // email or phone
+  channel   String   @default("ALL") // "EMAIL" | "SMS" | "WHATSAPP" | "ALL"
+  reason    String   // "UNSUBSCRIBED" | "BOUNCED" | "INVALID" | "USER_SUPPRESSED" | "PROVIDER_BLOCKED"
+  source    String?
+  createdAt DateTime @default(now())
+
+  @@unique([contact, channel])
+  @@index([contact])
+}
+
+model OutreachAuditLog {
+  id         String    @id @default(cuid())
+  userId     String?
+  businessId String
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  outreachId String?
+  outreach   Outreach? @relation(fields: [outreachId], references: [id], onDelete: SetNull)
+  action     String    // "OUTREACH_CREATED" | "OUTREACH_QUEUED" | "OUTREACH_SENT" | "OUTREACH_DELIVERED" | "OUTREACH_FAILED" | "OUTREACH_SUPPRESSED" | "OUTREACH_CANCELLED"
+  channel    String
+  provider   String?
+  metadata   String?   // JSON object with details, duration, etc.
+  timestamp  DateTime  @default(now())
+
+  @@index([businessId])
+  @@index([outreachId])
+  @@index([action])
+}
+
+model Job {
+  id              String   @id @default(cuid())
+  type            String   @default("LEAD_SEARCH")
+  status          String   @default("PENDING") // "PENDING" | "RUNNING" | "COMPLETED" | "FAILED"
+  criteria        String   // JSON of SearchRequestPayload
+  totalDiscovered Int      @default(0)
+  totalProcessed  Int      @default(0)
+  totalQualified  Int      @default(0)
+  error           String?
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  pipelineRuns    PipelineRun[]
+}
+
+model PipelineRun {
+  id               String     @id @default(cuid())
+  jobId            String
+  job              Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status           String     @default("RUNNING") // "RUNNING" | "COMPLETED" | "FAILED"
+  stage            String     @default("TARGET_CREATED")
+  recordsProcessed Int        @default(0)
+  recordsFailed    Int        @default(0)
+  startedAt        DateTime   @default(now())
+  completedAt      DateTime?
+  error            String?
+
+  actorRuns        ActorRun[]
+
+  @@index([jobId])
+}
+
+model ActorRun {
+  id            String      @id @default(cuid())
+  pipelineRunId String
+  pipelineRun   PipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+  actorName     String
+  status        String      @default("RUNNING") // "RUNNING" | "COMPLETED" | "FAILED" | "SKIPPED"
+  inputCount    Int         @default(0)
+  outputCount   Int         @default(0)
+  durationMs    Int         @default(0)
+  error         String?
+  createdAt     DateTime    @default(now())
+
+  @@index([pipelineRunId])
+}

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Menu, X, Compass, Sparkles } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 export function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -85,6 +86,7 @@ export function Navbar() {
 
         {/* Right: Actions */}
         <div className="hidden sm:flex items-center gap-3">
+          <ThemeToggle />
           <Link
             href="/signin"
             className="text-[13px] font-medium text-slate-600 hover:text-slate-900 px-3 py-1.5 transition-colors"
@@ -151,12 +153,15 @@ export function Navbar() {
           </a>
 
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3">
-            <Link
-              href="/signin"
-              className="text-xs font-medium text-slate-600 px-3 py-2"
-            >
-              Sign In
-            </Link>
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <Link
+                href="/signin"
+                className="text-xs font-medium text-slate-600 px-3 py-2"
+              >
+                Sign In
+              </Link>
+            </div>
             <Link
               href="/signup"
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium text-white bg-slate-900"

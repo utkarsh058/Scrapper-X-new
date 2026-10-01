@@ -180,6 +180,27 @@ export interface Lead {
   demoGenerated?: boolean;
   estimatedRevenue?: string;
   employeeCount?: string;
+  outreachStatus?: 'Not Contacted' | 'Queued' | 'Sent' | 'Delivered' | 'Failed' | 'Suppressed' | 'PENDING' | 'SENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED' | 'BOUNCED' | 'SUPPRESSED';
+  lastOutreachAt?: string;
+}
+
+export interface OutreachRecord {
+  id: string;
+  leadId: string;
+  businessName: string;
+  channel: 'EMAIL' | 'SMS' | 'WHATSAPP';
+  recipient: string;
+  subject?: string;
+  message: string;
+  status: 'PENDING' | 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED' | 'CANCELLED' | 'BOUNCED' | 'SUPPRESSED';
+  provider?: string;
+  providerMessageId?: string;
+  evidenceUsed?: string[];
+  errorCode?: string;
+  errorMessage?: string;
+  sentAt?: string;
+  deliveredAt?: string;
+  createdAt: string;
 }
 
 export interface MetricSummary {

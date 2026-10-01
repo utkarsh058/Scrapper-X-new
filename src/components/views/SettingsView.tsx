@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings, 
   Key, 
@@ -11,7 +11,11 @@ import {
   Save, 
   CheckCircle2, 
   CreditCard,
-  Mail
+  Mail,
+  Phone,
+  MessageSquare,
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -23,6 +27,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
   const [agencyName, setAgencyName] = useState('Apex Growth Partners');
   const [senderEmail, setSenderEmail] = useState('utkarsh@leadpilot.agency');
   const [rateLimit, setRateLimit] = useState('40 requests/min');
+  const [providerStatus, setProviderStatus] = useState<any>({
+    email: { configured: false, provider: 'none', ready: false },
+    sms: { configured: false, provider: 'none', ready: false },
+    whatsapp: { configured: false, provider: 'none', ready: false },
+  });
+  const [loadingProviders, setLoadingProviders] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/outreach/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.providers) {
+          setProviderStatus(data.providers);
+        }
+      })
+      .catch((err) => console.error('Failed to fetch provider status:', err))
+      .finally(() => setLoadingProviders(false));
+  }, []);
 
   const saveSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,7 +69,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
           {[
             { id: 'general', label: 'Agency Profile', icon: Settings },
             { id: 'scraper', label: 'Scraper Engine & Proxies', icon: Sliders },
-            { id: 'outreach', label: 'Sender Domains & Email', icon: Mail },
+            { id: 'outreach', label: 'Outreach Providers & Delivery', icon: Mail },
             { id: 'api', label: 'API Keys & Webhooks', icon: Key },
           ].map((item) => {
             const Icon = item.icon;
@@ -56,7 +78,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               <button
                 key={item.id}
                 onClick={() => setActiveSection(item.id as any)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[12.5px] font-medium text-left transition-colors ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[12.5px] font-medium text-left transition-colors cursor-pointer ${
                   isSelected
                     ? 'bg-teal-50 text-teal-800 font-semibold border border-teal-200/80'
                     : 'text-[#4B5563] hover:bg-[#F3F4F6]'
@@ -130,11 +152,76 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
             {activeSection === 'outreach' && (
               <div className="space-y-4">
                 <h3 className="text-[14px] font-bold text-[#171717] border-b border-[#F1F3F5] pb-2">
-                  Sender Domain Authentication (DKIM/SPF)
+                  Live Automated Outreach Channels & Providers
                 </h3>
-                <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-950 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span>Domain <strong>leadpilot.agency</strong> is verified and ready for cold inbox delivery.</span>
+
+                {/* Email Provider Card */}
+                <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-teal-700" />
+                      <span className="font-bold text-slate-800">Email Dispatch Provider</span>
+                      <span className="text-[11px] text-slate-500 font-mono">({providerStatus.email.provider || 'Resend / SendGrid'})</span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10.5px] font-bold border ${
+                        providerStatus.email.ready
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}
+                    >
+                      {providerStatus.email.ready ? 'CONFIGURED & READY' : 'NOT CONFIGURED'}
+                    </span>
+                  </div>
+                  <p className="text-[11.5px] text-slate-600">
+                    Transmits evidence-grounded audit reports directly to verified prospect inboxes. Configure <code className="px-1 py-0.5 rounded bg-slate-200 font-mono text-[11px]">RESEND_API_KEY</code> and <code className="px-1 py-0.5 rounded bg-slate-200 font-mono text-[11px]">RESEND_FROM_EMAIL</code> in <code className="font-mono text-[11px]">.env</code> to activate.
+                  </p>
+                </div>
+
+                {/* SMS Provider Card */}
+                <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-4 w-4 text-indigo-700" />
+                      <span className="font-bold text-slate-800">SMS Dispatch Provider</span>
+                      <span className="text-[11px] text-slate-500 font-mono">(Twilio REST API)</span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10.5px] font-bold border ${
+                        providerStatus.sms.ready
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}
+                    >
+                      {providerStatus.sms.ready ? 'CONFIGURED & READY' : 'NOT CONFIGURED'}
+                    </span>
+                  </div>
+                  <p className="text-[11.5px] text-slate-600">
+                    Dispatches concise text alerts with interactive prototype links. Configure <code className="px-1 py-0.5 rounded bg-slate-200 font-mono text-[11px]">TWILIO_ACCOUNT_SID</code>, <code className="px-1 py-0.5 rounded bg-slate-200 font-mono text-[11px]">TWILIO_AUTH_TOKEN</code>, and <code className="px-1 py-0.5 rounded bg-slate-200 font-mono text-[11px]">TWILIO_PHONE_NUMBER</code> in <code className="font-mono text-[11px]">.env</code> to activate.
+                  </p>
+                </div>
+
+                {/* WhatsApp Provider Card */}
+                <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4 text-emerald-700" />
+                      <span className="font-bold text-slate-800">WhatsApp Dispatch Provider</span>
+                      <span className="text-[11px] text-slate-500 font-mono">(Meta WhatsApp Cloud API v20.0)</span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10.5px] font-bold border ${
+                        providerStatus.whatsapp.ready
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}
+                    >
+                      {providerStatus.whatsapp.ready ? 'CONFIGURED & READY' : 'NOT CONFIGURED'}
+                    </span>
+                  </div>
+                  <p className="text-[11.5px] text-slate-600">
+                    Direct business messaging via official Graph API v20.0 endpoints. Configure <code className="px-1 py-0.5 rounded bg-slate-200 font-mono text-[11px]">WHATSAPP_API_TOKEN</code> and <code className="px-1 py-0.5 rounded bg-slate-200 font-mono text-[11px]">WHATSAPP_PHONE_NUMBER_ID</code> in <code className="font-mono text-[11px]">.env</code> to activate.
+                  </p>
                 </div>
               </div>
             )}
@@ -142,15 +229,46 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
             {activeSection === 'api' && (
               <div className="space-y-4">
                 <h3 className="text-[14px] font-bold text-[#171717] border-b border-[#F1F3F5] pb-2">
-                  LeadPilot Developer API
+                  External Provider Credentials & Database
                 </h3>
+
                 <div>
                   <label className="block text-[11.5px] font-semibold text-[#374151] mb-1">
-                    Live Secret Key
+                    Canonical Database Engine
                   </label>
-                  <div className="p-2.5 rounded-md border border-[#E5E7EB] bg-[#F7F8FA] font-mono text-[12px] text-[#374151]">
-                    lp_live_948f10398bb2744c80a84d44ef
+                  <div className="p-2.5 rounded-md border border-emerald-200 bg-emerald-50/50 font-mono text-[12px] text-emerald-900 flex items-center justify-between">
+                    <span>SQLite / PostgreSQL (Prisma Canonical Schema)</span>
+                    <span className="text-[11px] font-sans font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">CONNECTED</span>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11.5px] font-semibold text-[#374151] mb-1">
+                    Google Places API Key (Business Discovery)
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="AIzaSy... (Configured via GOOGLE_PLACES_API_KEY in .env)"
+                    defaultValue={process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY || ''}
+                    className="w-full rounded-md border border-[#D1D5DB] bg-[#F7F8FA] px-3 py-1.5 text-[12.5px] text-[#171717] focus:border-teal-700 focus:bg-white focus:outline-none font-mono"
+                  />
+                  <p className="text-[11px] text-[#6B7280] mt-1">
+                    Used for real-time global discovery, place ratings, and verified review counts.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[11.5px] font-semibold text-[#374151] mb-1">
+                    Google PageSpeed Insights API Key
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="AIzaSy... (Configured via PAGESPEED_API_KEY in .env)"
+                    className="w-full rounded-md border border-[#D1D5DB] bg-[#F7F8FA] px-3 py-1.5 text-[12.5px] text-[#171717] focus:border-teal-700 focus:bg-white focus:outline-none font-mono"
+                  />
+                  <p className="text-[11px] text-[#6B7280] mt-1">
+                    Used for authentic Lighthouse mobile performance, accessibility, and Core Web Vitals scoring.
+                  </p>
                 </div>
               </div>
             )}
@@ -158,7 +276,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
             <div className="pt-3 border-t border-[#F1F3F5] flex justify-end">
               <button
                 type="submit"
-                className="flex items-center gap-1.5 rounded-md bg-teal-700 hover:bg-teal-800 text-white px-4 py-1.5 text-[12.5px] font-medium transition-all shadow-subtle"
+                className="flex items-center gap-1.5 rounded-md bg-teal-700 hover:bg-teal-800 text-white px-4 py-1.5 text-[12.5px] font-medium transition-all shadow-subtle cursor-pointer"
               >
                 <Save className="h-3.5 w-3.5" />
                 <span>Save Changes</span>

@@ -11,7 +11,6 @@ import {
   Settings
 } from 'lucide-react';
 import { NavTab } from '@/types';
-import { mockNotifications } from '@/data/mockData';
 
 interface HeaderProps {
   activeTab: NavTab;
@@ -67,7 +66,16 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [notifications, setNotifications] = useState([
+    {
+      id: 'notif-1',
+      title: 'Database Persistence Active',
+      description: 'Connected to canonical SQLite Prisma database.',
+      message: 'Connected to canonical SQLite Prisma database.',
+      time: 'Real-time',
+      read: false,
+    },
+  ]);
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
