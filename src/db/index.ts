@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import { LeadEntity } from '@/models/Lead';
 import { Job, ActorRun } from '@/models/Job';
 
@@ -9,84 +7,16 @@ export interface CacheEntry<T = any> {
   expiresAt: number; // unix timestamp in ms
 }
 
-interface StoredDbData {
-  leads: Record<string, LeadEntity>;
-  jobs: Record<string, Job>;
-  actorRuns: Record<string, ActorRun>;
-}
-
 class LeadPilotDatabase {
   private leadsMap: Map<string, LeadEntity> = new Map();
   private jobsMap: Map<string, Job> = new Map();
   private actorRunsMap: Map<string, ActorRun> = new Map();
   private cacheMap: Map<string, CacheEntry> = new Map();
-  private filePath: string;
-  private saveDebounceTimer: NodeJS.Timeout | null = null;
-
-  constructor() {
-    this.filePath = path.join(process.cwd(), 'data', 'leadpilot_db.json');
-    this.loadState();
-  }
-
-  private loadState(): void {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        const raw = fs.readFileSync(this.filePath, 'utf-8');
-        const parsed: StoredDbData = JSON.parse(raw);
-
-        if (parsed.leads) {
-          for (const [k, v] of Object.entries(parsed.leads)) {
-            this.leadsMap.set(k, v);
-          }
-        }
-        if (parsed.jobs) {
-          for (const [k, v] of Object.entries(parsed.jobs)) {
-            this.jobsMap.set(k, v);
-          }
-        }
-        if (parsed.actorRuns) {
-          for (const [k, v] of Object.entries(parsed.actorRuns)) {
-            this.actorRunsMap.set(k, v);
-          }
-        }
-      }
-    } catch (err: any) {
-      console.warn('[LeadPilotDatabase] Failed to load persistent state:', err.message);
-    }
-  }
-
-  private scheduleSave(): void {
-    if (this.saveDebounceTimer) return;
-    this.saveDebounceTimer = setTimeout(() => {
-      this.saveDebounceTimer = null;
-      this.persistState();
-    }, 250);
-  }
-
-  private persistState(): void {
-    try {
-      const dir = path.dirname(this.filePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      const data: StoredDbData = {
-        leads: Object.fromEntries(this.leadsMap.entries()),
-        jobs: Object.fromEntries(Array.from(this.jobsMap.entries()).slice(-100)), // keep last 100 jobs
-        actorRuns: Object.fromEntries(Array.from(this.actorRunsMap.entries()).slice(-500)), // keep last 500 runs
-      };
-
-      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (err: any) {
-      console.warn('[LeadPilotDatabase] Failed to persist state:', err.message);
-    }
-  }
 
   // --- Leads Operations ---
   public upsertLead(lead: LeadEntity): LeadEntity {
     lead.updatedAt = new Date().toISOString();
     this.leadsMap.set(lead.leadId, lead);
-    this.scheduleSave();
     return lead;
   }
 
@@ -95,7 +25,6 @@ class LeadPilotDatabase {
       lead.updatedAt = new Date().toISOString();
       this.leadsMap.set(lead.leadId, lead);
     }
-    this.scheduleSave();
   }
 
   public getLead(leadId: string): LeadEntity | undefined {
@@ -136,7 +65,6 @@ class LeadPilotDatabase {
   // --- Jobs Operations ---
   public createJob(job: Job): Job {
     this.jobsMap.set(job.id, job);
-    this.scheduleSave();
     return job;
   }
 
@@ -145,7 +73,6 @@ class LeadPilotDatabase {
     if (!existing) return undefined;
     const updated = { ...existing, ...updates };
     this.jobsMap.set(jobId, updated);
-    this.scheduleSave();
     return updated;
   }
 
@@ -162,7 +89,6 @@ class LeadPilotDatabase {
   // --- ActorRuns Operations ---
   public createActorRun(run: ActorRun): ActorRun {
     this.actorRunsMap.set(run.id, run);
-    this.scheduleSave();
     return run;
   }
 
@@ -171,7 +97,6 @@ class LeadPilotDatabase {
     if (!existing) return undefined;
     const updated = { ...existing, ...updates };
     this.actorRunsMap.set(runId, updated);
-    this.scheduleSave();
     return updated;
   }
 
@@ -209,4 +134,3 @@ class LeadPilotDatabase {
 }
 
 export const leadPilotDb = new LeadPilotDatabase();
-

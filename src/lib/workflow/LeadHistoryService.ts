@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-
 export type ContactStatus =
   | 'NOT_CONTACTED'
   | 'CONTACTED'
@@ -54,75 +51,10 @@ export interface SearchFingerprintRecord {
   lastDeliveryAt: string;
 }
 
-interface StoredWorkflowData {
-  histories: Record<string, LeadHistoryRecord>;
-  attempts: ContactAttemptRecord[];
-  fingerprints: Record<string, SearchFingerprintRecord>;
-}
-
 export class LeadHistoryService {
   private histories: Map<string, LeadHistoryRecord> = new Map();
   private attempts: ContactAttemptRecord[] = [];
   private fingerprints: Map<string, SearchFingerprintRecord> = new Map();
-  private filePath: string;
-  private saveDebounceTimer: NodeJS.Timeout | null = null;
-
-  constructor() {
-    this.filePath = path.join(process.cwd(), 'data', 'lead_workflow.json');
-    this.loadState();
-  }
-
-  private loadState(): void {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        const raw = fs.readFileSync(this.filePath, 'utf-8');
-        const parsed: StoredWorkflowData = JSON.parse(raw);
-
-        if (parsed.histories) {
-          for (const [k, v] of Object.entries(parsed.histories)) {
-            this.histories.set(k, v);
-          }
-        }
-        if (parsed.attempts && Array.isArray(parsed.attempts)) {
-          this.attempts = parsed.attempts;
-        }
-        if (parsed.fingerprints) {
-          for (const [k, v] of Object.entries(parsed.fingerprints)) {
-            this.fingerprints.set(k, v);
-          }
-        }
-      }
-    } catch (err: any) {
-      console.warn('[LeadHistoryService] Failed to load workflow state:', err.message);
-    }
-  }
-
-  private scheduleSave(): void {
-    if (this.saveDebounceTimer) return;
-    this.saveDebounceTimer = setTimeout(() => {
-      this.saveDebounceTimer = null;
-      this.persistState();
-    }, 200);
-  }
-
-  private persistState(): void {
-    try {
-      const dir = path.dirname(this.filePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      const data: StoredWorkflowData = {
-        histories: Object.fromEntries(this.histories.entries()),
-        attempts: this.attempts.slice(-500), // Keep last 500 attempts
-        fingerprints: Object.fromEntries(this.fingerprints.entries()),
-      };
-
-      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (err: any) {
-      console.warn('[LeadHistoryService] Failed to persist workflow state:', err.message);
-    }
-  }
 
   /**
    * Generates a normalized search fingerprint key.
@@ -229,8 +161,6 @@ export class LeadHistoryService {
       fp.previouslyReturnedPlaceIds = Array.from(combinedIds);
       this.fingerprints.set(fingerprintKey, fp);
     }
-
-    this.scheduleSave();
   }
 
   /**
@@ -298,7 +228,6 @@ export class LeadHistoryService {
     }
 
     this.histories.set(placeId, history);
-    this.scheduleSave();
 
     return {
       success: true,
@@ -314,7 +243,6 @@ export class LeadHistoryService {
     this.histories.clear();
     this.attempts = [];
     this.fingerprints.clear();
-    this.persistState();
   }
 }
 
