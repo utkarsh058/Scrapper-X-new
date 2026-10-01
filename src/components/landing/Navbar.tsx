@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Menu, X, Compass, Sparkles } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 interface NavbarProps {
   onNavigate?: (view: 'landing' | 'dashboard' | 'auth', authMode?: 'signin' | 'signup') => void;
@@ -89,6 +90,7 @@ export function Navbar({ onNavigate }: NavbarProps = {}) {
 
         {/* Right: Actions */}
         <div className="hidden sm:flex items-center gap-2 sm:gap-3">
+          <ThemeToggle />
           <button
             onClick={() => onNavigate ? onNavigate('dashboard') : (window.location.href = '/dashboard')}
             className="text-[13px] font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100/80 border border-teal-200/70 px-3.5 py-1.5 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs hover:scale-[1.02] active:scale-[0.98]"
@@ -182,12 +184,15 @@ export function Navbar({ onNavigate }: NavbarProps = {}) {
           </a>
 
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3">
-            <Link
-              href="/signin"
-              className="text-xs font-medium text-slate-600 px-3 py-2"
-            >
-              Sign In
-            </Link>
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <Link
+                href="/signin"
+                className="text-xs font-medium text-slate-600 px-3 py-2"
+              >
+                Sign In
+              </Link>
+            </div>
             <Link
               href="/signup"
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium text-white bg-slate-900"

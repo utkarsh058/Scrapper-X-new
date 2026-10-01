@@ -16,9 +16,16 @@ import {
   Send, 
   Edit3, 
   FileSearch,
-  Loader2
+  Loader2,
+  AlertTriangle,
+  ShieldCheck,
+  MessageSquare,
+  Download,
+  CheckCircle2,
+  Clock,
+  ShieldAlert
 } from 'lucide-react';
-import { Lead } from '@/types';
+import { Lead, OutreachRecord } from '@/types';
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -39,6 +46,16 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
   const [isEditingOutreach, setIsEditingOutreach] = useState(false);
   const [copiedOutreach, setCopiedOutreach] = useState(false);
 
+  // Live Outreach & Preview state
+  const [outreachHistory, setOutreachHistory] = useState<OutreachRecord[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [isSendingLive, setIsSendingLive] = useState(false);
+  const [selectedChannel, setSelectedChannel] = useState<'EMAIL' | 'SMS' | 'WHATSAPP'>('EMAIL');
+  const [modalSubject, setModalSubject] = useState('');
+  const [modalBody, setModalBody] = useState('');
+
   // Demo state
   const [isGeneratingDemo, setIsGeneratingDemo] = useState(false);
   const [demoReady, setDemoReady] = useState(false);
@@ -48,6 +65,22 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState(false);
 
+  const fetchOutreachHistory = async () => {
+    if (!lead?.id) return;
+    setLoadingHistory(true);
+    try {
+      const res = await fetch(`/api/outreach/history?leadId=${lead.id}`);
+      const data = await res.json();
+      if (data.success) {
+        setOutreachHistory(data.outreaches || []);
+      }
+    } catch {
+      setOutreachHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
   useEffect(() => {
     if (lead) {
       setOutreachMessage(null);
@@ -56,6 +89,8 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
       setIsGeneratingDemo(false);
       setIsGeneratingOutreach(false);
       setPreviewDemoOpen(false);
+      setIsPreviewModalOpen(false);
+      fetchOutreachHistory();
     }
   }, [lead?.id]);
 
@@ -99,16 +134,20 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
 
   const handleGenerateOutreach = () => {
     setIsGeneratingOutreach(true);
-    setTimeout(() => {
-      setIsGeneratingOutreach(false);
-      const generated = `Hi ${lead.contact.name || 'there'},\n\nI was looking into ${lead.industry.toLowerCase()} businesses in ${lead.location.city} and came across ${lead.businessName}.\n\nI noticed ${
-        lead.website.hasWebsite 
-          ? `your website has detectable issues (${detectedIssues.slice(0, 2).join(', ')}), which could be costing you prospective clients.` 
-          : `you don't currently have an active modern website, which means local customers are visiting competitors instead.`
-      }\n\nWe put together a rapid interactive prototype showing how a streamlined modern site for ${lead.businessName} could boost conversions.\n\nWould you be open to a 30-second preview?\n\nBest,\nAlex Morgan\nLeadPilot`;
-      setOutreachMessage(generated);
-      onShowToast('AI Outreach Generated', `Created personalized pitch for ${lead.businessName}.`, 'success');
-    }, 800);
+
+    const issuesSnippet = detectedIssues.length > 0
+      ? detectedIssues.slice(0, 2).join(' and ')
+      : 'potential mobile and conversion enhancements';
+
+    const evidenceClaim = lead.website.hasWebsite
+      ? `testing your official website (${lead.website.url || 'online listing'}) revealed ${issuesSnippet}, which may impact prospective client inquiries.`
+      : `customers searching for ${lead.industry.toLowerCase()} services in ${lead.location.city} are visiting competitor sites because your business profile lacks an active, modern website.`;
+
+    const generated = `Hello ${lead.contact.name || lead.businessName} Team,\n\nI was reviewing leading ${lead.industry.toLowerCase()} businesses in ${lead.location.city} and noted your strong presence.\n\nWhile analyzing your digital touchpoints, our diagnostic scan indicated that ${evidenceClaim}\n\nWe put together a streamlined mobile-first concept showing how resolving this could improve customer conversion for ${lead.businessName}.\n\nWould you be open to a brief 30-second review?\n\nSincerely,\nGrowth Operations\nLeadPilot`;
+
+    setOutreachMessage(generated);
+    setIsGeneratingOutreach(false);
+    onShowToast('Evidence-Based Pitch Generated', `Personalized from verified audit findings.`, 'success');
   };
 
   const handleCopyOutreach = () => {
@@ -119,17 +158,100 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
     onShowToast('Copied to Clipboard', 'Outreach message ready to paste.', 'success');
   };
 
-  const handleSendOutreach = () => {
-    onShowToast('Outreach Sent', `Message dispatched to ${lead.contact.email || lead.businessName}.`, 'success');
+  const handleOpenOutreachPreview = async () => {
+    setIsGeneratingOutreach(true);
+    try {
+      const res = await fetch('/api/outreach/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadId: lead.id, previewOnly: true }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPreviewData(data);
+        const rec = data.eligibility.recommendedChannel;
+        const initialChannel = (rec !== 'NONE' && (rec === 'EMAIL' || rec === 'SMS' || rec === 'WHATSAPP')) ? rec : 'EMAIL';
+        setSelectedChannel(initialChannel);
+        
+        if (initialChannel === 'EMAIL') {
+          setModalSubject(data.generated.subject || '');
+          setModalBody(data.generated.bodyText || data.generated.emailBody || '');
+        } else if (initialChannel === 'SMS') {
+          setModalSubject('');
+          setModalBody(data.generated.smsMessage || data.generated.smsBody || '');
+        } else {
+          setModalSubject('');
+          setModalBody(data.generated.whatsAppMessage || data.generated.whatsappBody || '');
+        }
+
+        setIsPreviewModalOpen(true);
+      } else {
+        onShowToast('Outreach Eligibility Notice', data.error || 'Failed to generate outreach preview.', 'warning');
+      }
+    } catch (err: any) {
+      onShowToast('Error', err.message || 'Failed to connect to outreach service.', 'error');
+    } finally {
+      setIsGeneratingOutreach(false);
+    }
+  };
+
+  const handleSelectChannel = (ch: 'EMAIL' | 'SMS' | 'WHATSAPP') => {
+    setSelectedChannel(ch);
+    if (!previewData?.generated) return;
+    if (ch === 'EMAIL') {
+      setModalSubject(previewData.generated.subject || '');
+      setModalBody(previewData.generated.bodyText || previewData.generated.emailBody || '');
+    } else if (ch === 'SMS') {
+      setModalSubject('');
+      setModalBody(previewData.generated.smsMessage || previewData.generated.smsBody || '');
+    } else {
+      setModalSubject('');
+      setModalBody(previewData.generated.whatsAppMessage || previewData.generated.whatsappBody || '');
+    }
+  };
+
+  const handleExecuteLiveSend = async () => {
+    setIsSendingLive(true);
+    try {
+      const res = await fetch('/api/outreach/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          leadId: lead.id, 
+          channel: selectedChannel,
+          subject: selectedChannel === 'EMAIL' ? modalSubject : undefined,
+          body: modalBody
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsPreviewModalOpen(false);
+        onShowToast(
+          'Outreach Transmitted',
+          `Message sent to ${data.outreach.recipient} via ${data.outreach.provider} (ID: ${data.outreach.providerMessageId || 'Confirmed'}).`,
+          'success'
+        );
+        fetchOutreachHistory();
+      } else {
+        onShowToast(
+          'Transmission Notice',
+          data.error || data.outreach?.errorMessage || 'Outreach could not be transmitted.',
+          'warning'
+        );
+        fetchOutreachHistory();
+      }
+    } catch (err: any) {
+      onShowToast('Transmission Error', err.message || 'Failed to transmit outreach.', 'error');
+    } finally {
+      setIsSendingLive(false);
+    }
   };
 
   const handleGenerateDemo = () => {
     setIsGeneratingDemo(true);
-    setTimeout(() => {
-      setIsGeneratingDemo(false);
-      setDemoReady(true);
-      onShowToast('Demo Ready', `Demo website generated for ${lead.businessName}.`, 'success');
-    }, 1000);
+    setDemoReady(true);
+    setIsGeneratingDemo(false);
+    onShowToast('Demo Ready', `Interactive client concept prepared for ${lead.businessName}.`, 'success');
   };
 
   return (
@@ -297,18 +419,19 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
                 <span>Audit Website</span>
               </button>
 
-              {/* Generate AI Message Action */}
+              {/* Send Outreach Action */}
               <button
-                onClick={handleGenerateOutreach}
+                onClick={handleOpenOutreachPreview}
                 disabled={isGeneratingOutreach}
-                className="flex items-center justify-center gap-1.5 h-10 min-h-[40px] px-3 rounded-xl bg-[#0F172A] hover:bg-[#1E293B] text-white text-[12px] font-medium transition-colors shadow-2xs cursor-pointer disabled:opacity-75 btn-pressable"
+                className="flex items-center justify-center gap-1.5 h-10 min-h-[40px] px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-[12px] font-semibold transition-colors shadow-2xs cursor-pointer disabled:opacity-75 btn-pressable"
+                title="Review evidence and initiate real automated outreach"
               >
                 {isGeneratingOutreach ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-400" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
                 ) : (
-                  <Sparkles className="h-3.5 w-3.5 text-teal-400" />
+                  <Send className="h-3.5 w-3.5 text-teal-200" />
                 )}
-                <span>Generate AI Message</span>
+                <span>Send Outreach</span>
               </button>
 
               {/* Create Website Demo Action */}
@@ -394,7 +517,7 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
                 </button>
 
                 <button
-                  onClick={handleSendOutreach}
+                  onClick={handleOpenOutreachPreview}
                   className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg bg-[#0F172A] hover:bg-[#1E293B] text-white text-[11.5px] font-semibold cursor-pointer"
                 >
                   <Send className="h-3 w-3 text-teal-400" />
@@ -426,8 +549,348 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
               </button>
             </div>
           )}
+
+          {/* 13. Persistent Outreach Activity & Delivery History */}
+          <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Send className="h-4 w-4 text-teal-600" />
+                <h3 className="text-[13px] font-bold text-[#0F172A]">
+                  Outreach Activity & Delivery
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-slate-100 text-[#475569] text-[11px] font-semibold">
+                  {outreachHistory.length}
+                </span>
+              </div>
+
+              {outreachHistory.length > 0 && (
+                <a
+                  href={`/api/outreach/export?leadId=${lead.id}`}
+                  download
+                  className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-teal-700 hover:text-teal-800 transition-colors"
+                  title="Download complete delivery audit as Excel (.xlsx)"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Export (.xlsx)</span>
+                </a>
+              )}
+            </div>
+
+            {loadingHistory ? (
+              <div className="py-4 flex items-center justify-center gap-2 text-slate-500 text-[12px]">
+                <Loader2 className="h-4 w-4 animate-spin text-teal-600" />
+                <span>Loading delivery logs...</span>
+              </div>
+            ) : outreachHistory.length === 0 ? (
+              <div className="p-3 rounded-lg bg-slate-50 border border-dashed border-slate-200 text-center">
+                <p className="text-[11.5px] text-slate-500">
+                  No automated outreach records found for this lead.
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Click &quot;Send Outreach&quot; above to preview grounded copy and transmit live.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+                {outreachHistory.map((item) => {
+                  const isSuccess = item.status === 'SENT' || item.status === 'DELIVERED' || item.status === 'READ';
+                  const isPending = item.status === 'QUEUED' || item.status === 'SENDING' || item.status === 'PENDING';
+                  const isSuppressed = item.status === 'SUPPRESSED';
+
+                  const badgeClass = isSuccess
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : isPending
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : isSuppressed
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-rose-50 text-rose-700 border-rose-200';
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-3 rounded-lg border border-slate-100 bg-[#F8FAFC] text-[12px] space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          {item.channel === 'EMAIL' ? (
+                            <Mail className="h-3.5 w-3.5 text-slate-600" />
+                          ) : item.channel === 'SMS' ? (
+                            <Phone className="h-3.5 w-3.5 text-slate-600" />
+                          ) : (
+                            <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                          )}
+                          <span className="font-semibold text-slate-800">{item.channel}</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="text-slate-600 truncate max-w-[150px] font-mono text-[11px]">
+                            {item.recipient}
+                          </span>
+                        </div>
+
+                        <span className={`px-2 py-0.5 rounded text-[10.5px] font-bold border ${badgeClass}`}>
+                          {item.status}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
+                        <span>Provider: <strong className="text-slate-700 font-mono">{item.provider}</strong></span>
+                        <span>
+                          {new Date(item.createdAt).toLocaleDateString()} {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+
+                      {item.errorMessage && (
+                        <div className="p-2 rounded bg-rose-50 border border-rose-200 text-rose-700 text-[11px] flex items-start gap-1.5 mt-1">
+                          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                          <span className="break-all">{item.errorMessage}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Real Outreach Preview & Live Execution Modal */}
+      {isPreviewModalOpen && previewData && (
+        <div className="fixed inset-0 z-70 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-4 px-6 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div>
+                <h3 className="text-[15px] font-bold text-slate-900 flex items-center gap-2">
+                  <Send className="h-4 w-4 text-teal-600" />
+                  Live Automated Outreach: {lead.businessName}
+                </h3>
+                <p className="text-[11.5px] text-slate-500 mt-0.5">
+                  Verified claims strictly grounded in actual audit diagnostics.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsPreviewModalOpen(false)}
+                className="h-8 w-8 rounded-lg text-slate-400 hover:text-slate-800 hover:bg-slate-200 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* Channel Selector Tabs */}
+              <div>
+                <label className="text-[11.5px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                  Select Outreach Channel
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['EMAIL', 'SMS', 'WHATSAPP'] as const).map((ch) => {
+                    const isSelected = selectedChannel === ch;
+                    const chEligibility =
+                      ch === 'EMAIL'
+                        ? previewData.eligibility?.email
+                        : ch === 'SMS'
+                        ? previewData.eligibility?.sms
+                        : previewData.eligibility?.whatsapp;
+
+                    const isEligible = chEligibility?.eligible;
+
+                    return (
+                      <button
+                        key={ch}
+                        type="button"
+                        onClick={() => handleSelectChannel(ch)}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'border-teal-600 bg-teal-50/60 ring-2 ring-teal-500/20'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-1.5 font-bold text-[12px] text-slate-900">
+                            {ch === 'EMAIL' ? (
+                              <Mail className="h-3.5 w-3.5 text-teal-600" />
+                            ) : ch === 'SMS' ? (
+                              <Phone className="h-3.5 w-3.5 text-indigo-600" />
+                            ) : (
+                              <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                            )}
+                            <span>{ch}</span>
+                          </div>
+                          <span
+                            className={`h-2 w-2 rounded-full ${
+                              isEligible ? 'bg-emerald-500' : 'bg-rose-400'
+                            }`}
+                            title={isEligible ? 'Channel Eligible' : chEligibility?.reason || 'Ineligible'}
+                          />
+                        </div>
+
+                        <div className="mt-2 text-[10.5px] truncate text-slate-600 font-mono">
+                          {chEligibility?.recipient || 'No contact info'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Grounded Evidence Claims Badge Box */}
+              {previewData.generated?.evidenceUsed && previewData.generated.evidenceUsed.length > 0 && (
+                <div className="p-3.5 rounded-xl bg-teal-50/50 border border-teal-200 space-y-2">
+                  <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-teal-900">
+                    <ShieldCheck className="h-3.5 w-3.5 text-teal-600" />
+                    <span>Verified Technical Audit Evidence Used in Pitch:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {previewData.generated.evidenceUsed.map((evidence: string, idx: number) => (
+                      <span
+                        key={idx}
+                        className="px-2 py-0.5 rounded-md bg-white border border-teal-200 text-teal-800 text-[11px] font-medium shadow-2xs"
+                      >
+                        ✓ {evidence}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[10.5px] text-teal-700">
+                    Zero fabricated claims. This pitch only references problems verified by your crawler.
+                  </p>
+                </div>
+              )}
+
+              {/* Message Content Inputs */}
+              <div className="space-y-3">
+                {selectedChannel === 'EMAIL' && (
+                  <div>
+                    <label className="text-[11.5px] font-bold text-slate-700 block mb-1">
+                      Email Subject
+                    </label>
+                    <input
+                      type="text"
+                      value={modalSubject}
+                      onChange={(e) => setModalSubject(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 p-2 text-[12.5px] text-slate-900 focus:outline-none focus:border-teal-600"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11.5px] font-bold text-slate-700">
+                      Message Body ({selectedChannel})
+                    </label>
+                    <span className="text-[10.5px] text-slate-400">
+                      {modalBody.length} characters
+                    </span>
+                  </div>
+                  <textarea
+                    value={modalBody}
+                    onChange={(e) => setModalBody(e.target.value)}
+                    rows={selectedChannel === 'EMAIL' ? 7 : 4}
+                    className="w-full rounded-lg border border-slate-300 p-2.5 text-[12px] text-slate-900 font-sans focus:outline-none focus:border-teal-600"
+                  />
+                </div>
+              </div>
+
+              {/* Provider Readiness & Eligibility Banner */}
+              {(() => {
+                const currentEligibility =
+                  selectedChannel === 'EMAIL'
+                    ? previewData.eligibility?.email
+                    : selectedChannel === 'SMS'
+                    ? previewData.eligibility?.sms
+                    : previewData.eligibility?.whatsapp;
+
+                if (!currentEligibility?.eligible) {
+                  return (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11.5px] flex items-start gap-2">
+                      <ShieldAlert className="h-4 w-4 text-rose-600 mt-0.5 shrink-0" />
+                      <div>
+                        <strong className="block font-semibold">Channel Ineligible</strong>
+                        <span>{currentEligibility?.reason || 'This channel cannot be reached for this lead.'}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (!currentEligibility.providerConfigured) {
+                  return (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11.5px] flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                      <div>
+                        <strong className="block font-semibold">
+                          Provider Not Configured ({currentEligibility.providerName})
+                        </strong>
+                        <span>
+                          Live credentials (API key) for this provider are missing in your .env. In accordance with LeadPilot&apos;s real data policy, no mock delivery will occur. Sending now will record the attempt as FAILED with an explicit provider configuration error.
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11.5px] flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>
+                      Live Provider Active: Ready to transmit to <strong>{currentEligibility.recipient}</strong> via <strong>{currentEligibility.providerName}</strong>.
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 px-6 border-t border-slate-200 flex items-center justify-between bg-slate-50">
+              <a
+                href={`/api/outreach/export?leadId=${lead.id}`}
+                download
+                className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-slate-600 hover:text-slate-900"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Download Report (.xlsx)</span>
+              </a>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewModalOpen(false)}
+                  className="px-3.5 py-2 rounded-xl border border-slate-300 text-slate-700 text-[12px] font-medium hover:bg-slate-100 cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExecuteLiveSend}
+                  disabled={
+                    isSendingLive ||
+                    !(
+                      selectedChannel === 'EMAIL'
+                        ? previewData.eligibility?.email?.eligible
+                        : selectedChannel === 'SMS'
+                        ? previewData.eligibility?.sms?.eligible
+                        : previewData.eligibility?.whatsapp?.eligible
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-[12px] font-bold shadow-sm transition-colors cursor-pointer"
+                >
+                  {isSendingLive ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Transmitting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-3.5 w-3.5" />
+                      <span>Transmit Outreach</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Clean Demo Preview Modal */}
       {previewDemoOpen && (

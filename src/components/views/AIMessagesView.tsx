@@ -34,14 +34,14 @@ export const AIMessagesView: React.FC<AIMessagesViewProps> = ({ onShowToast }) =
       channel: 'Email',
       icon: Mail,
       subject: 'Quick question regarding {{BusinessName}}\'s mobile booking flow',
-      body: `Hi {{OwnerFirstName}},\n\nI was reviewing leading {{Industry}} businesses in {{City}} and noticed {{BusinessName}} has stellar reviews ({{ReviewRating}} stars).\n\nHowever, when testing your website on an iPhone, it currently takes ~{{LoadSpeedSeconds}}s to load and lacks direct online booking. In {{City}}, our data shows that causes ~{{LostLeadsPerMonth}} prospective clients to bounce to nearby competitors each month.\n\nWe built a rapid 1-click interactive demo showing what a modern patient/client booking portal would look like for {{BusinessName}}:\n👉 {{CustomDemoURL}}\n\nNo pitch or obligation — take a 30-second look and let me know if you'd like the code or design assets.\n\nBest,\nUtkarsh Sharma\nLeadPilot Growth Agency`,
+      body: `Hi {{OwnerFirstName}},\n\nI was reviewing leading {{Industry}} businesses in {{City}} and noticed {{BusinessName}} has strong local presence.\n\nHowever, when reviewing your digital presence, our diagnostic indicated that your website takes ~{{LoadSpeedSeconds}}s to load on smartphones and lacks a direct online appointment CTA. In {{City}}, potential clients routinely bounce to nearby competitors when online scheduling is absent.\n\nWe put together a rapid interactive concept showing what a modern mobile booking portal would look like for {{BusinessName}}:\n👉 {{CustomDemoURL}}\n\nNo pitch or obligation — take a 30-second look and let me know if you would like the design assets.\n\nBest regards,\n{{YourName}}\n{{YourAgency}}`,
     },
     'loom-script': {
       title: '60-Second Loom Video Script',
       channel: 'Video Pitch',
       icon: Video,
       subject: 'Video Audit for {{OwnerFirstName}} (60 seconds)',
-      body: `[0:00 - 0:10] "Hey {{OwnerFirstName}}, Utkarsh here. I have {{BusinessName}}'s website pulled up on my screen right now..."\n\n[0:10 - 0:30] "I ran a quick performance scan and noticed two major conversion leaks: first, your mobile viewport isn't adapting on iOS, and second, your contact form is throwing an SSL warning..."\n\n[0:30 - 0:50] "To show you what's possible, I already generated a functional prototype with instant booking at {{CustomDemoURL}}..."\n\n[0:50 - 1:00] "If you want me to transfer this over to your team or connect it to your domain, let me know! Have a great week."`,
+      body: `[0:00 - 0:10] "Hey {{OwnerFirstName}}, {{YourName}} here. I have {{BusinessName}}'s website pulled up on my screen right now..."\n\n[0:10 - 0:30] "I ran a performance diagnostic and noticed two major conversion leaks: first, your mobile viewport isn't adapting on iOS, and second, your contact form is throwing an SSL warning..."\n\n[0:30 - 0:50] "To show you what's possible, I already generated a functional prototype with instant booking at {{CustomDemoURL}}..."\n\n[0:50 - 1:00] "If you want me to transfer this over to your team or connect it to your domain, let me know! Have a great week."`,
     },
     'sms': {
       title: 'Direct SMS / WhatsApp Follow-up',

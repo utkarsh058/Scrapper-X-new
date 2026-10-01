@@ -28,7 +28,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<NavTab>('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // Real Leads state (No mock data in real search flow)
+  // Real Leads state (Loaded from canonical persistent database)
   const [leads, setLeads] = useState<Lead[]>([]);
   const [searchSummary, setSearchSummary] = useState<SearchSummary | null>(null);
   const [searchStatus, setSearchStatus] = useState<SearchStatusType | null>(null);
@@ -41,6 +41,19 @@ export default function DashboardPage() {
   const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [auditTargetLead, setAuditTargetLead] = useState<Lead | null>(null);
+
+  // Load real persisted leads on initial mount
+  React.useEffect(() => {
+    fetch('/api/leads?limit=100')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.leads) && data.leads.length > 0) {
+          setLeads(data.leads);
+          setHasSearched(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Modals & Panels state
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -353,6 +366,7 @@ export default function DashboardPage() {
           {/* WEBSITE AUDIT VIEW */}
           {activeTab === 'website-audit' && (
             <WebsiteAuditView
+              leads={leads}
               onSelectLead={setSelectedLead}
               onOpenQuickAudit={handleOpenQuickAudit}
               onShowToast={addToast}
@@ -372,6 +386,7 @@ export default function DashboardPage() {
           {/* DEMO WEBSITES VIEW */}
           {activeTab === 'demo-websites' && (
             <DemoWebsitesView
+              leads={leads}
               onSelectLead={setSelectedLead}
               onShowToast={addToast}
             />
@@ -405,6 +420,17 @@ export default function DashboardPage() {
         isOpen={isFindLeadsModalOpen}
         onClose={() => setIsFindLeadsModalOpen(false)}
         onShowToast={addToast}
+        onSearchSubmitted={(criteria) => {
+          handleLeadSearchSubmit({
+            country: 'India',
+            state: criteria.state,
+            city: criteria.city,
+            industry: criteria.industry,
+            contact: 'All Contacts',
+            website: 'All Websites',
+            limit: (criteria.limit as any) || 50,
+          });
+        }}
       />
 
       {/* Export Modal */}

@@ -20,20 +20,26 @@ interface FindLeadsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onShowToast: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  onSearchSubmitted?: (criteria: { state: string; city: string; industry: string; limit: number }) => void;
 }
 
 export const FindLeadsModal: React.FC<FindLeadsModalProps> = ({
   isOpen,
   onClose,
   onShowToast,
+  onSearchSubmitted,
 }) => {
-  const [industry, setIndustry] = useState('Dental & Orthodontics');
-  const [location, setLocation] = useState('Austin, TX');
+  const [industry, setIndustry] = useState('Clinics');
+  const [location, setLocation] = useState('Greater Noida, Uttar Pradesh');
   const [radius, setRadius] = useState('25 miles');
   const [noWebsiteOnly, setNoWebsiteOnly] = useState(false);
   const [poorWebsiteOnly, setPoorWebsiteOnly] = useState(true);
   const [verifiedContactOnly, setVerifiedContactOnly] = useState(true);
   const [isDiscovering, setIsDiscovering] = useState(false);
+
+  const locParts = location.split(',').map(s => s.trim());
+  const city = locParts[0] || 'Greater Noida';
+  const stateName = locParts[1] || 'Uttar Pradesh';
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -50,16 +56,28 @@ export const FindLeadsModal: React.FC<FindLeadsModalProps> = ({
   const handleStartDiscovery = (e: React.FormEvent) => {
     e.preventDefault();
     setIsDiscovering(true);
+    onClose();
 
-    setTimeout(() => {
-      setIsDiscovering(false);
-      onClose();
+    if (onSearchSubmitted) {
+      onSearchSubmitted({
+        state: stateName,
+        city,
+        industry,
+        limit: 50,
+      });
       onShowToast(
-        'Discovery Batch Queued',
-        `Searching ${industry} in ${location} (${radius}). Est. 35-60 leads will be enriched.`,
+        'Pipeline Started',
+        `Executing real discovery for ${industry} in ${city}, ${stateName}.`,
+        'info'
+      );
+    } else {
+      onShowToast(
+        'Discovery Configured',
+        `Ready to search ${industry} in ${city}, ${stateName}.`,
         'success'
       );
-    }, 900);
+    }
+    setIsDiscovering(false);
   };
 
   return (

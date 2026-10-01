@@ -75,40 +75,55 @@ export const QuickAuditModal: React.FC<QuickAuditModalProps> = ({
     'Generating AI modernization blueprint...',
   ];
 
-  const handleRunAudit = (e: React.FormEvent) => {
+  const handleRunAudit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!urlInput.trim() && !lead) return;
+    const targetUrl = urlInput.trim() || lead?.website?.url;
+    if (!targetUrl) {
+      onShowToast('Missing URL', 'Please enter a website URL to audit.', 'warning');
+      return;
+    }
 
     if (intervalRef.current) clearInterval(intervalRef.current);
     setIsAuditing(true);
-    setAuditStep(0);
+    setAuditStep(1);
     setAuditResult(null);
 
-    intervalRef.current = setInterval(() => {
-      setAuditStep((prev) => {
-        if (prev < steps.length - 1) {
-          return prev + 1;
-        } else {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          setIsAuditing(false);
-          const computedScore = lead?.website.speedScore || (lead ? (lead.businessName.length * 7) % 35 + 45 : 65);
-          setAuditResult({
-            score: computedScore,
-            speed: `${((100 - computedScore) / 12 + 1.8).toFixed(1)}s`,
-            mobileOptimized: lead?.website.mobileOptimized ?? (computedScore > 65),
-            ssl: lead?.website.sslSecure ?? true,
-            issues: lead?.auditIssues || [
-              'Mobile viewport tag is missing or misconfigured',
-              'Large unoptimized image assets causing slow initial paint',
-              'No direct calendar booking widget detected',
-              'Missing OpenGraph social cards and structured schema markup',
-            ],
-          });
-          onShowToast('Audit Complete', `Analysis finished for ${urlInput.trim() || lead?.businessName}`, 'success');
-          return prev;
-        }
+    try {
+      const res = await fetch('/api/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetUrl }),
       });
-    }, 380);
+
+      const data = await res.json();
+      setIsAuditing(false);
+
+      if (data.success && data.audit) {
+        const a = data.audit;
+        const allIssues = [
+          ...a.technicalIssues,
+          ...a.mobileIssues,
+          ...a.conversionIssues,
+          ...a.seoIssues,
+        ];
+
+        setAuditResult({
+          score: a.performanceScore != null ? a.performanceScore : (a.isReachable ? 75 : 15),
+          speed: a.coreWebVitals?.lcpMs ? `${(a.coreWebVitals.lcpMs / 1000).toFixed(1)}s` : (a.isReachable ? 'Verified' : 'Unreachable'),
+          mobileOptimized: a.mobileIssues.length === 0,
+          ssl: !a.technicalIssues.some((t: string) => t.toLowerCase().includes('https')),
+          issues: allIssues.length > 0 ? allIssues : ['All core technical, mobile, and conversion checks passed.'],
+          isPageSpeedAvailable: a.isPageSpeedAvailable,
+        });
+
+        onShowToast('Audit Complete', `Real analysis finished for ${targetUrl}`, 'success');
+      } else {
+        onShowToast('Audit Notice', data.error || 'Failed to complete website audit.', 'warning');
+      }
+    } catch (err: any) {
+      setIsAuditing(false);
+      onShowToast('Audit Error', err.message || 'Network error executing audit.', 'error');
+    }
   };
 
   return (

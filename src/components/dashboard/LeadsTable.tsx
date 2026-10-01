@@ -17,7 +17,8 @@ import {
   Globe,
   MapPin,
   Building,
-  AlertTriangle
+  AlertTriangle,
+  Send
 } from 'lucide-react';
 import { 
   Lead, 
@@ -277,6 +278,60 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
     );
   };
 
+  // Export Outreach Report (.xlsx) from real canonical database records
+  const handleExportOutreachExcel = () => {
+    setIsExportDropdownOpen(false);
+    window.location.href = '/api/outreach/export';
+    onShowToast('Export Started', 'Generating 27-column Outreach Report (.xlsx)...', 'success');
+  };
+
+  // Render Outreach Status Cell
+  const renderOutreachStatusCell = (lead: Lead) => {
+    const raw = String(lead.outreachStatus || '').toUpperCase();
+
+    if (raw === 'SENT' || raw === 'DELIVERED' || raw === 'READ') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          {raw === 'DELIVERED' ? 'Delivered' : raw === 'READ' ? 'Read' : 'Sent'}
+        </span>
+      );
+    }
+
+    if (raw === 'QUEUED' || raw === 'SENDING' || raw === 'PENDING') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+          Queued
+        </span>
+      );
+    }
+
+    if (raw === 'FAILED' || raw === 'BOUNCED') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+          {raw === 'BOUNCED' ? 'Bounced' : 'Failed'}
+        </span>
+      );
+    }
+
+    if (raw === 'SUPPRESSED') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+          Suppressed
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-medium text-slate-500 bg-slate-50 border border-slate-200">
+        Not Contacted
+      </span>
+    );
+  };
+
   return (
     <div id="leads-section" className="rounded-2xl border border-[#E2E8F0] bg-white shadow-xs overflow-hidden">
       {/* 1. DEDICATED RESULTS HEADER */}
@@ -327,20 +382,28 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
             </button>
 
             {isExportDropdownOpen && (
-              <div className="absolute right-0 mt-1.5 w-36 rounded-xl border border-[#E2E8F0] bg-white shadow-lg py-1 z-30 animate-popover text-[12px]">
+              <div className="absolute right-0 mt-1.5 w-48 rounded-xl border border-[#E2E8F0] bg-white shadow-lg py-1 z-30 animate-popover text-[12px]">
                 <button
                   onClick={() => handleExport('CSV')}
                   className="w-full flex items-center gap-2 px-3 py-2 text-left text-[#334155] hover:bg-[#F8FAFC] hover:text-[#0F172A] transition-colors cursor-pointer"
                 >
                   <FileText className="h-3.5 w-3.5 text-teal-600" />
-                  <span>CSV</span>
+                  <span>Leads (CSV)</span>
                 </button>
                 <button
                   onClick={() => handleExport('Excel')}
                   className="w-full flex items-center gap-2 px-3 py-2 text-left text-[#334155] hover:bg-[#F8FAFC] hover:text-[#0F172A] transition-colors cursor-pointer"
                 >
                   <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
-                  <span>Excel</span>
+                  <span>Leads (Excel)</span>
+                </button>
+                <div className="border-t border-slate-100 my-1" />
+                <button
+                  onClick={handleExportOutreachExcel}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-teal-800 font-semibold hover:bg-teal-50/50 transition-colors cursor-pointer"
+                >
+                  <Send className="h-3.5 w-3.5 text-teal-600" />
+                  <span>Outreach Report (.xlsx)</span>
                 </button>
               </div>
             )}
@@ -768,6 +831,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                 <th className="px-3 py-3">Website</th>
                 <th className="px-3 py-3">Website Status</th>
                 <th className="px-4 py-3">Website Issues</th>
+                <th className="px-3 py-3">Outreach</th>
                 <th className="px-3 py-3">Source</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -900,7 +964,12 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                       )}
                     </td>
 
-                    {/* 9. Source (Multi-Source Provenance) */}
+                    {/* 9. Outreach Status */}
+                    <td className="px-3 py-3.5 align-top whitespace-nowrap">
+                      {renderOutreachStatusCell(lead)}
+                    </td>
+
+                    {/* 10. Source */}
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">
                       <div className="flex flex-wrap gap-1 max-w-[140px]">
                         {((lead as any).sources && (lead as any).sources.length > 0
