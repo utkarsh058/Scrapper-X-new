@@ -120,8 +120,8 @@ export async function auditBusinessWebsite(rawUrl?: string): Promise<WebsiteAudi
       status = 'Needs Website Improvement';
     }
 
-    // Calculate approximate speed score based on response time
-    const speedScore = Math.max(15, Math.min(98, Math.round(100 - (duration / 40))));
+    // Do not fabricate speed scores from HTTP response duration
+    const speedScore = undefined;
 
     return {
       hasWebsite: true,

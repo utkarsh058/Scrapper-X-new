@@ -378,7 +378,8 @@ export async function analyzeWebsiteQuality(rawUrl?: string): Promise<WebsiteAna
     status = 'Needs Improvement';
   }
 
-  const speedScore = Math.max(20, Math.min(96, Math.round(100 - (preCheck.durationMs / 45))));
+  // Do not fabricate speed scores from HTTP response duration
+  const speedScore = undefined;
 
   const structuredAudit: StructuredWebsiteAudit = {
     technical: {

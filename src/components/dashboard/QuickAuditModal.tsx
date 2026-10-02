@@ -98,22 +98,20 @@ export const QuickAuditModal: React.FC<QuickAuditModalProps> = ({
       const data = await res.json();
       setIsAuditing(false);
 
-      if (data.success && data.audit) {
-        const a = data.audit;
-        const allIssues = [
-          ...a.technicalIssues,
-          ...a.mobileIssues,
-          ...a.conversionIssues,
-          ...a.seoIssues,
-        ];
+      if (data.success && (data.report || data.audit)) {
+        const a = data.report || data.audit;
+        const issueFindings = (a.findings || []).filter((f: any) => f.status === 'FAIL' || f.status === 'WARNING');
+        const allIssues = issueFindings.map((f: any) => `${f.check}: ${f.evidence || f.recommendation}`);
 
         setAuditResult({
-          score: a.performanceScore != null ? a.performanceScore : (a.isReachable ? 75 : 15),
-          speed: a.coreWebVitals?.lcpMs ? `${(a.coreWebVitals.lcpMs / 1000).toFixed(1)}s` : (a.isReachable ? 'Verified' : 'Unreachable'),
-          mobileOptimized: a.mobileIssues.length === 0,
-          ssl: !a.technicalIssues.some((t: string) => t.toLowerCase().includes('https')),
+          score: a.performance?.score != null 
+            ? `${a.performance.score} / 100` 
+            : (a.performance?.status === 'NOT_CONFIGURED' ? 'Not Configured' : 'Unavailable'),
+          speed: a.performance?.lcpMs ? `${(a.performance.lcpMs / 1000).toFixed(1)}s LCP` : `${a.responseTimeMs}ms TTFB`,
+          mobileOptimized: Boolean(a.mobile?.viewportConfigured && !a.mobile?.hasHorizontalOverflowRisk),
+          ssl: Boolean(a.sslValid),
           issues: allIssues.length > 0 ? allIssues : ['All core technical, mobile, and conversion checks passed.'],
-          isPageSpeedAvailable: a.isPageSpeedAvailable,
+          rawReport: a,
         });
 
         onShowToast('Audit Complete', `Real analysis finished for ${targetUrl}`, 'success');
@@ -215,10 +213,10 @@ export const QuickAuditModal: React.FC<QuickAuditModalProps> = ({
               <div className="grid grid-cols-3 gap-2.5 text-[12px]">
                 <div className="p-3 rounded-lg border border-[#E5E7EB] bg-[#FAFAFB]">
                   <span className="text-[10.5px] text-[#6B7280] block">Speed Score</span>
-                  <div className="text-[17px] font-bold text-rose-700 tabular-nums">
-                    {auditResult.score} / 100
+                  <div className="text-[15px] font-bold text-slate-800 tabular-nums">
+                    {auditResult.score}
                   </div>
-                  <span className="text-[10px] text-[#9CA3AF]">Load: {auditResult.speed}</span>
+                  <span className="text-[10px] text-[#9CA3AF]">Metrics: {auditResult.speed}</span>
                 </div>
 
                 <div className="p-3 rounded-lg border border-[#E5E7EB] bg-[#FAFAFB]">

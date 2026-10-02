@@ -32,3 +32,4 @@ yarn-error.log*
 .leadpilot/
 node_modules
 .env*
+scratch/
