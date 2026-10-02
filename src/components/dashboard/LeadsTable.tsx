@@ -80,13 +80,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
   const requestedLimit = pipelineStats?.requestedLimit ?? 100;
 
   const isGoogleExecuted = googleCount > 0 && (googleStatus === 'COMPLETE' || googleStatus === 'SUCCESS' || googleStatus === 'PARTIAL');
-  const providerLabel = isGoogleExecuted
-    ? 'PRIMARY: Google Places'
-    : googleStatus === 'PROVIDER_NOT_CONFIGURED'
-      ? 'PRIMARY: Google Places (Not Configured, Fallback: OSM)'
-      : googleStatus === 'FAILED' || googleStatus === 'PROVIDER_FAILURE'
-        ? 'PRIMARY: Google Places (Failed, Fallback: OSM)'
-        : 'PRIMARY: Google Places';
+  const providerLabel = 'PRIMARY: Google Places';
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -428,9 +422,9 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
               {providerLabel}
             </span>
             <span className="text-slate-600">|</span>
-            <span>Google: <strong className="text-white">{googleStatus === 'PROVIDER_NOT_CONFIGURED' ? 'Not Configured' : googleStatus === 'PROVIDER_FAILURE' || googleStatus === 'FAILED' ? 'Failed' : googleCount}</strong></span>
+            <span>Google: <strong className="text-white">{googleStatus === 'PROVIDER_NOT_CONFIGURED' ? 'Not Configured' : googleStatus === 'PROVIDER_FAILURE' || googleStatus === 'FAILED' ? 'Failed' : 'Active'}</strong></span>
             <span>•</span>
-            <span>OSM fallback: <strong className="text-white">{osmStatus === 'PROVIDER_NOT_CONFIGURED' ? 'Disabled' : osmStatus === 'PROVIDER_FAILURE' || osmStatus === 'FAILED' ? 'Failed' : osmStatus === 'NOT_NEEDED' ? '0' : osmCount}</strong></span>
+            <span>OSM: <strong className="text-white">Supplemental</strong></span>
             <span>•</span>
             <span>Merged: <strong className="text-white">{mergedUnique}</strong></span>
             <span>•</span>

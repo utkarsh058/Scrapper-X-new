@@ -166,9 +166,17 @@ export class ProviderManager {
         onProgress?.(`Google Places encountered an error: ${gErr.message}. Continuing with OpenStreetMap fallback...`);
       }
     } else {
-      const disabledStatus = !health.googlePlaces.enabled ? 'DISABLED' : 'DISABLED';
+      let disabledStatus: 'DISABLED' | 'PROVIDER_NOT_CONFIGURED' | 'PROVIDER_FAILURE' | 'FAILED' = 'DISABLED';
+      if (!health.googlePlaces.enabled) {
+        disabledStatus = 'DISABLED';
+      } else if (!health.googlePlaces.configured) {
+        disabledStatus = 'PROVIDER_NOT_CONFIGURED';
+      } else {
+        disabledStatus = 'PROVIDER_FAILURE';
+      }
+
       result.providers.googlePlaces = {
-        status: disabledStatus,
+        status: disabledStatus as any,
         rawCount: 0,
         discovered: 0,
         pagesRequested: 0,
@@ -176,15 +184,17 @@ export class ProviderManager {
         reason: health.googlePlaces.message || 'GOOGLE_PLACES_API_KEY is not configured on the server.',
         errors: [health.googlePlaces.reason || 'MISSING_API_KEY'],
       };
-      onProgress?.('Google Places is not active (missing API key or disabled). Using OpenStreetMap as discovery source...');
+      onProgress?.(`Google Places is not active (${health.googlePlaces.reason}). Using OpenStreetMap as discovery source...`);
     }
 
     // --- STEP 2: OPENSTREETMAP AS SECONDARY / FALLBACK PROVIDER ---
     // Section 1 & 7: OSM remains available as fallback and secondary source.
-    // If Google Places returns results and OSM returns results, both are fed to MultiSourceMergeActor.
+    // Only invoke OSM if Google failed, returned zero, or returned insufficient candidates
     const isOsmEnabled = health.osm.configured && health.osm.enabled;
+    const googleFailed = ['FAILED', 'DISABLED', 'PROVIDER_NOT_CONFIGURED', 'PROVIDER_FAILURE'].includes(result.providers.googlePlaces.status);
+    const needOsm = googleFailed || result.businesses.length < requestedLimit * 1.5;
 
-    if (isOsmEnabled) {
+    if (isOsmEnabled && needOsm) {
       onProgress?.('Executing OpenStreetMap Overpass as Secondary / Fallback discovery source...');
       const oStart = Date.now();
       const osmTimeouts = getTimeoutConfig();
@@ -226,6 +236,15 @@ export class ProviderManager {
           errors: [oErr.message],
         };
       }
+    } else if (isOsmEnabled && !needOsm) {
+      result.providers.osm = {
+        status: 'NOT_NEEDED',
+        rawCount: 0,
+        discovered: 0,
+        durationMs: 0,
+        reason: 'Google Places provided sufficient candidates; OSM supplemental discovery bypassed for latency.',
+        errors: [],
+      };
     } else {
       result.providers.osm = {
         status: 'DISABLED',

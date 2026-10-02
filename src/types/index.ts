@@ -231,6 +231,7 @@ export interface Lead {
   createdAt?: string;
   updatedAt?: string;
   dateDiscovered?: string;
+  rawTags?: any;
 
   // Backward-compatible structured sub-objects for existing dashboard components
   location: {

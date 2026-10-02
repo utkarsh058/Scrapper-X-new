@@ -465,12 +465,13 @@ function processRawElementsToLeads(
 
     // 1. Business Name (Must be an actual named venue)
     const rawName = tags.name || tags['name:en'] || tags.brand || tags.operator;
-    if (!rawName || rawName.trim().length === 0) {
+    const businessName = rawName ? rawName.trim() : '';
+    if (!businessName || businessName.length === 0) {
       noNameCount++;
-      continue;
+      // DO NOT CONTINUE: Let Orchestrator catch this for accurate rejection tracking
+    } else {
+      namedCount++;
     }
-    namedCount++;
-    const businessName = rawName.trim();
 
     // 2. OSM Identifiers
     const sourceId = `osm:${el.type}:${el.id}`;
@@ -487,14 +488,16 @@ function processRawElementsToLeads(
 
     if (lat === undefined || lon === undefined) {
       outsideCityCount++;
-      continue;
+      // DO NOT CONTINUE: Let Orchestrator catch this
     }
 
     // 4. STRICT GEOGRAPHIC VERIFICATION
-    // If coordinate is not in the requested city boundary, REJECT IT!
-    if (!isCoordinateInLocation(lat, lon, city, state)) {
-      outsideCityCount++;
-      continue;
+    // Track if coordinate is not in the requested city boundary
+    if (lat !== undefined && lon !== undefined) {
+      if (!isCoordinateInLocation(lat, lon, city, state)) {
+        outsideCityCount++;
+        // DO NOT CONTINUE: Let Orchestrator catch this for accurate rejection tracking
+      }
     }
 
     // 5. Cross-City Tag Conflict Check
@@ -504,7 +507,7 @@ function processRawElementsToLeads(
       const reqCityLow = city.toLowerCase();
       if (vCityLow !== reqCityLow && !vCityLow.includes(reqCityLow) && !reqCityLow.includes(vCityLow)) {
         outsideCityCount++;
-        continue;
+        // DO NOT CONTINUE: Let Orchestrator catch this for accurate rejection tracking
       }
     }
 
@@ -525,14 +528,14 @@ function processRawElementsToLeads(
     const websiteUrl = normalizeWebsiteUrl(rawWebsite);
     const websiteSource = websiteUrl ? 'OSM' : null;
 
-    // 7. Deduplication by Phone & Website
+    // 7. Deduplication by Phone & Website (Tracked only)
     if (phone && seenPhones.has(phone)) {
       duplicateCount++;
-      continue;
+      // DO NOT CONTINUE: Let Orchestrator's MultiSourceMergeActor handle cross-deduplication
     }
     if (websiteUrl && seenWebsites.has(websiteUrl.toLowerCase())) {
       duplicateCount++;
-      continue;
+      // DO NOT CONTINUE
     }
 
     // 8. Proximity + Normalized Name Deduplication (within 200m)
@@ -540,7 +543,7 @@ function processRawElementsToLeads(
     const isDuplicate = leads.some((existing) => {
       const existingNorm = normalizeString(existing.businessName);
       if (existingNorm === normName) {
-        if (existing.latitude && existing.longitude) {
+        if (existing.latitude && existing.longitude && lat !== undefined && lon !== undefined) {
           const dist = getDistanceMeters(existing.latitude, existing.longitude, lat, lon);
           if (dist < 200) return true;
         } else {
@@ -552,7 +555,7 @@ function processRawElementsToLeads(
 
     if (isDuplicate) {
       duplicateCount++;
-      continue;
+      // DO NOT CONTINUE: Orchestrator DeduplicationActor will catch this
     }
 
     seenSourceIds.add(sourceId);
@@ -662,6 +665,7 @@ function processRawElementsToLeads(
           ? 'Email'
           : 'None',
       },
+      rawTags: tags,
       leadScore: (hasPhone ? 25 : 0) + (hasEmail ? 35 : 0) + (hasWebsite ? 20 : 10) + 15,
     };
 

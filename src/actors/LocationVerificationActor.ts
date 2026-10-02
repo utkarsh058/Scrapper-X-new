@@ -32,13 +32,28 @@ export class LocationVerificationActor extends BaseActor<LocationVerificationInp
     const rejected: { business: RawDiscoveredBusiness; reason: string }[] = [];
 
     for (const b of businesses) {
-      if (b.latitude && b.longitude) {
-        const inBounds = isCoordinateInLocation(b.latitude, b.longitude, city, state);
-        if (!inBounds) {
+      if (!b.latitude || !b.longitude) {
+        rejected.push({ business: b, reason: 'OUTSIDE_LOCATION' });
+        continue;
+      }
+
+      const inBounds = isCoordinateInLocation(b.latitude, b.longitude, city, state);
+      if (!inBounds) {
+        rejected.push({ business: b, reason: 'OUTSIDE_LOCATION' });
+        continue;
+      }
+
+      // Check cross-city tag conflict for OSM data
+      const venueCityTag = b.rawTags?.['addr:city']?.trim();
+      if (venueCityTag && city) {
+        const vCityLow = venueCityTag.toLowerCase();
+        const reqCityLow = city.toLowerCase();
+        if (vCityLow !== reqCityLow && !vCityLow.includes(reqCityLow) && !reqCityLow.includes(vCityLow)) {
           rejected.push({ business: b, reason: 'OUTSIDE_LOCATION' });
           continue;
         }
       }
+
       verified.push(b);
     }
 
