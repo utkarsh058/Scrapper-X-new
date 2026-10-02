@@ -85,12 +85,43 @@ export class JobManager {
     return await execPromise;
   }
 
+  public getInFlightPromise(criteria: SearchRequestPayload): Promise<Job> | undefined {
+    const requestKey = this.getSearchRequestKey(criteria);
+    return this.inFlightExecutions.get(requestKey);
+  }
+
   public getJob(jobId: string): Job | undefined {
     return leadPilotDb.getJob(jobId);
   }
 
+  public async getJobAsync(jobId: string): Promise<Job | undefined> {
+    return leadPilotDb.getJobAsync(jobId);
+  }
+
   public getProgress(jobId: string) {
     const job = leadPilotDb.getJob(jobId);
+    if (!job) return null;
+    return {
+      jobId: job.id,
+      status: job.status,
+      sourceStatus: job.sourceStatus,
+      progressLog: job.progressLog,
+      counters: {
+        discovered: job.discovered,
+        verified: job.verified,
+        deduplicated: job.deduplicated,
+        enriched: job.enriched,
+        audited: job.audited,
+        qualified: job.qualified,
+        completed: job.completed,
+      },
+      rejectionReasons: job.rejectionReasons,
+      error: job.error,
+    };
+  }
+
+  public async getProgressAsync(jobId: string) {
+    const job = await leadPilotDb.getJobAsync(jobId);
     if (!job) return null;
     return {
       jobId: job.id,

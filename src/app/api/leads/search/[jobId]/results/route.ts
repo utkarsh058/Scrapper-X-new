@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchService } from '@/services/SearchService';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
     const { jobId } = await params;
-    const results = searchService.getJobResults(jobId);
+    const results = await searchService.getJobResultsAsync(jobId);
 
     if (!results) {
       return NextResponse.json(

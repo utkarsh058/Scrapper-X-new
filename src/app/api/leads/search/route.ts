@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isValidIndianState } from '@/data/indiaLocations';
 import { pipelineOrchestrator } from '@/lib/orchestrator/pipelineOrchestrator';
 import { searchService } from '@/services/SearchService';
+import { jobManager } from '@/jobs/JobManager';
+import { waitUntil } from '@vercel/functions';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -108,6 +110,14 @@ export async function POST(req: NextRequest) {
 
     // Default: Dispatch via searchService (supports both asynchronous polling and synchronous execution)
     const result = await searchService.startSearch(searchPayload as any, isSync);
+
+    if (!isSync) {
+      const inFlightPromise = jobManager.getInFlightPromise(searchPayload as any);
+      if (inFlightPromise) {
+        waitUntil(inFlightPromise);
+      }
+    }
+
     return NextResponse.json(result, {
       status: result.success === false ? 400 : 200,
     });

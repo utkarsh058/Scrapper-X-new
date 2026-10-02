@@ -30,8 +30,18 @@ export class SearchService {
     return jobManager.getProgress(jobId);
   }
 
+  public async getJobProgressAsync(jobId: string) {
+    return jobManager.getProgressAsync(jobId);
+  }
+
   public getJobResults(jobId: string) {
     const job = jobManager.getJob(jobId);
+    if (!job) return null;
+    return this.formatJobResponse(job);
+  }
+
+  public async getJobResultsAsync(jobId: string) {
+    const job = await jobManager.getJobAsync(jobId);
     if (!job) return null;
     return this.formatJobResponse(job);
   }
@@ -74,10 +84,14 @@ export class SearchService {
       results: frontendLeads,
       summary,
       providerStats: job.providerStats || {
-        googlePlaces: { rawCount: job.discovered, status: 'COMPLETE', durationMs: 0 },
-        osm: { rawCount: 0, status: 'NOT_NEEDED', durationMs: 0 },
-        web: { rawCount: 0, status: 'NOT_NEEDED', durationMs: 0 },
-        directory: { rawCount: 0, status: 'NOT_NEEDED', durationMs: 0 },
+        googlePlaces: {
+          rawCount: job.discovered || 0,
+          status: job.status === 'RUNNING' || job.status === 'PENDING' ? 'PENDING' : 'UNKNOWN',
+          durationMs: 0,
+        },
+        osm: { rawCount: 0, status: 'UNKNOWN', durationMs: 0 },
+        web: { rawCount: 0, status: 'UNKNOWN', durationMs: 0 },
+        directory: { rawCount: 0, status: 'UNKNOWN', durationMs: 0 },
       },
       pipelineStats: {
         rawOsmCount: job.providerStats?.osm?.rawCount ?? job.discovered,

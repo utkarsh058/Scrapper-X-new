@@ -63,8 +63,54 @@ class LeadPilotDatabase {
   }
 
   // --- Jobs Operations ---
+  public async persistJobToDb(job: Job): Promise<void> {
+    try {
+      const { prisma } = await import('@/lib/prisma');
+      const serialized = JSON.stringify({
+        job,
+        progressLog: job.progressLog,
+        rejectionReasons: job.rejectionReasons,
+        sourceStatus: job.sourceStatus,
+        statusReason: job.statusReason,
+        pipelineBreakdown: job.pipelineBreakdown,
+        providerStats: job.providerStats,
+        providersReport: job.providersReport,
+        rotationStats: job.rotationStats,
+        rejectedCandidates: job.rejectedCandidates,
+        leads: job.leads,
+      });
+
+      await prisma.job.upsert({
+        where: { id: job.id },
+        update: {
+          status: job.status,
+          totalDiscovered: job.discovered,
+          totalProcessed: job.verified,
+          totalQualified: job.qualified,
+          error: serialized,
+          completedAt: job.completedAt ? new Date(job.completedAt) : null,
+        },
+        create: {
+          id: job.id,
+          type: 'LEAD_SEARCH',
+          status: job.status,
+          criteria: JSON.stringify(job.criteria),
+          totalDiscovered: job.discovered,
+          totalProcessed: job.verified,
+          totalQualified: job.qualified,
+          error: serialized,
+          createdAt: new Date(job.startedAt || Date.now()),
+          completedAt: job.completedAt ? new Date(job.completedAt) : null,
+        },
+      });
+    } catch (err) {
+      console.warn('[LeadPilotDb] Failed to persist job to PostgreSQL:', err);
+    }
+  }
+
   public createJob(job: Job): Job {
     this.jobsMap.set(job.id, job);
+    this.persistJobToDb(job).catch(() => {});
     return job;
   }
 
@@ -73,11 +119,85 @@ class LeadPilotDatabase {
     if (!existing) return undefined;
     const updated = { ...existing, ...updates };
     this.jobsMap.set(jobId, updated);
+    this.persistJobToDb(updated).catch(() => {});
     return updated;
   }
 
   public getJob(jobId: string): Job | undefined {
     return this.jobsMap.get(jobId);
+  }
+
+  public async getJobAsync(jobId: string): Promise<Job | undefined> {
+    const memoryJob = this.jobsMap.get(jobId);
+    if (memoryJob) return memoryJob;
+
+    try {
+      const { prisma } = await import('@/lib/prisma');
+      const dbJob = await prisma.job.findUnique({
+        where: { id: jobId },
+      });
+
+      if (!dbJob) return undefined;
+
+      let criteria: any = {};
+      try {
+        criteria = JSON.parse(dbJob.criteria);
+      } catch {}
+
+      let extra: any = {};
+      if (dbJob.error) {
+        try {
+          extra = JSON.parse(dbJob.error);
+        } catch {}
+      }
+
+      const hydratedJob: Job = extra.job || {
+        id: dbJob.id,
+        searchId: dbJob.id,
+        status: dbJob.status as any,
+        criteria,
+        requestedLeads: criteria.limit || 25,
+        discovered: dbJob.totalDiscovered,
+        verified: dbJob.totalProcessed,
+        deduplicated: dbJob.totalProcessed,
+        enriched: dbJob.totalQualified,
+        audited: dbJob.totalQualified,
+        qualified: dbJob.totalQualified,
+        completed: dbJob.totalQualified,
+        failed: 0,
+        sourceStatus: extra.sourceStatus || 'COMPLETE',
+        sourceComplete: true,
+        statusReason: extra.statusReason,
+        rejectionReasons: extra.rejectionReasons || {
+          OUTSIDE_LOCATION: 0,
+          INVALID_CATEGORY: 0,
+          MISSING_NAME: 0,
+          DUPLICATE: 0,
+          NO_CONTACT: 0,
+          HAS_WEBSITE: 0,
+          NO_WEBSITE: 0,
+          WEBSITE_UNREACHABLE: 0,
+          AUDIT_FAILED: 0,
+          NOT_QUALIFIED: 0,
+          OTHER: 0,
+        },
+        progressLog: extra.progressLog || [],
+        leads: extra.leads || [],
+        providerStats: extra.providerStats,
+        providersReport: extra.providersReport,
+        pipelineBreakdown: extra.pipelineBreakdown,
+        rotationStats: extra.rotationStats,
+        rejectedCandidates: extra.rejectedCandidates || [],
+        startedAt: dbJob.createdAt.toISOString(),
+        completedAt: dbJob.completedAt ? dbJob.completedAt.toISOString() : undefined,
+      };
+
+      this.jobsMap.set(hydratedJob.id, hydratedJob);
+      return hydratedJob;
+    } catch (err) {
+      console.warn('[LeadPilotDb] Failed to fetch job from PostgreSQL:', err);
+      return undefined;
+    }
   }
 
   public listJobs(): Job[] {
