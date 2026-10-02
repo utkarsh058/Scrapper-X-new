@@ -36,6 +36,7 @@ export default function DashboardPage() {
   const [pipelineStats, setPipelineStats] = useState<PipelineStats | null>(null);
   const [providerStats, setProviderStats] = useState<ProviderStats | null>(null);
   const [pipelineBreakdown, setPipelineBreakdown] = useState<PipelineBreakdown | null>(null);
+  const [rotationStats, setRotationStats] = useState<any>(null);
   const [rejectedCandidates, setRejectedCandidates] = useState<RejectedCandidateItem[]>([]);
   const [rejectionReasons, setRejectionReasons] = useState<any>(null);
   const [statusReason, setStatusReason] = useState<string | null>(null);
@@ -249,6 +250,7 @@ export default function DashboardPage() {
             setPipelineStats(resultsData.pipelineStats || null);
             setProviderStats(resultsData.providerStats || null);
             setPipelineBreakdown(resultsData.pipelineBreakdown || null);
+            setRotationStats(resultsData.rotationStats || null);
             setRejectedCandidates(resultsData.rejectedCandidates || []);
             setRejectionReasons(resultsData.rejectionReasons || null);
             setStatusReason(resultsData.statusReason || null);
@@ -315,6 +317,7 @@ export default function DashboardPage() {
       setSearchSummary(null);
       setSearchStatus('FAILED');
       setPipelineStats(null);
+      setRotationStats(null);
       const msg = err instanceof LeadPilotApiError
         ? `${err.message}`
         : (err.message || 'Unable to connect to business search service.');
@@ -374,6 +377,7 @@ export default function DashboardPage() {
                 pipelineStats={pipelineStats}
                 providerStats={providerStats}
                 pipelineBreakdown={pipelineBreakdown}
+                rotationStats={rotationStats}
                 rejectedCandidates={rejectedCandidates}
                 rejectionReasons={rejectionReasons}
                 statusReason={statusReason}

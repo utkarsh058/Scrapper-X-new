@@ -117,10 +117,8 @@ export interface Job {
   rotationStats?: {
     totalEvaluated: number;
     deliveredCount: number;
-    neverReturnedCount: number;
-    previouslyReturnedCount: number;
-    previouslyContactedCount: number;
-    excludedDoNotContactCount: number;
+    newEligibleCount: number;
+    recentlyDeliveredCount: number;
   };
 
   startedAt: string;

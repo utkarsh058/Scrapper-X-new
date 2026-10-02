@@ -38,6 +38,12 @@ interface LeadsTableProps {
   pipelineBreakdown?: PipelineBreakdown | null;
   rejectedCandidates?: RejectedCandidateItem[];
   rejectionReasons?: any;
+  rotationStats?: {
+    totalEvaluated: number;
+    deliveredCount: number;
+    newEligibleCount: number;
+    recentlyDeliveredCount: number;
+  };
   statusReason?: string | null;
   errorMessage?: string | null;
   onSelectLead: (lead: Lead) => void;
@@ -57,6 +63,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
   pipelineBreakdown,
   rejectedCandidates = [],
   rejectionReasons,
+  rotationStats,
   statusReason,
   errorMessage,
   onSelectLead,
@@ -468,6 +475,25 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
               Close
             </button>
           </div>
+
+          {/* Genuine Diversification Diagnostics */}
+          {rotationStats && (
+            <div className="flex flex-wrap items-center gap-2 text-[11px] bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+              <span className="font-bold text-slate-300">DIVERSIFICATION (DB STATE):</span>
+              <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                TOTAL CANDIDATES: <strong className="text-white">{rotationStats.totalEvaluated}</strong>
+              </span>
+              <span className="px-2.5 py-1 rounded bg-teal-950/40 text-teal-300 border border-teal-800/50">
+                NEW/UNSEEN (ELIGIBLE): <strong className="text-white">{rotationStats.newEligibleCount}</strong>
+              </span>
+              <span className="px-2.5 py-1 rounded bg-rose-950/40 text-rose-300 border border-rose-800/50">
+                RECENTLY DELIVERED (EXCLUDED): <strong className="text-white">{rotationStats.recentlyDeliveredCount}</strong>
+              </span>
+              <span className="px-2.5 py-1 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-800/50">
+                FINAL DIVERSIFIED: <strong className="text-white">{rotationStats.deliveredCount}</strong>
+              </span>
+            </div>
+          )}
 
           {/* Rejection Reasons Summary Tags */}
           <div className="flex flex-wrap items-center gap-2 text-[11px]">

@@ -297,3 +297,16 @@ model ActorRun {
 
   @@index([pipelineRunId])
 }
+
+model SearchResultHistory {
+  id             String   @id @default(cuid())
+  placeId        String
+  jobId          String
+  fingerprintKey String
+  businessName   String
+  deliveredAt    DateTime @default(now())
+
+  @@index([fingerprintKey])
+  @@index([placeId])
+  @@index([deliveredAt])
+}

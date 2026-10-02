@@ -77,36 +77,44 @@ export class PipelineOrchestrator {
         },
       });
     } catch (err: any) {
-      await prisma.actorRun.create({
-        data: {
-          pipelineRunId: pipelineRun.id,
-          actorName: 'BusinessDiscoveryActor',
-          status: 'FAILED',
-          inputCount: 1,
-          outputCount: 0,
-          durationMs: Date.now() - actorDiscoveryStart,
-          error: err.message,
-        },
-      });
+      try {
+        await prisma.actorRun.create({
+          data: {
+            pipelineRunId: pipelineRun.id,
+            actorName: 'BusinessDiscoveryActor',
+            status: 'FAILED',
+            inputCount: 1,
+            outputCount: 0,
+            durationMs: Date.now() - actorDiscoveryStart,
+            error: err.message,
+          },
+        });
 
-      await prisma.pipelineRun.update({
-        where: { id: pipelineRun.id },
-        data: { status: 'FAILED', error: err.message },
-      });
+        await prisma.pipelineRun.update({
+          where: { id: pipelineRun.id },
+          data: { status: 'FAILED', error: err.message },
+        });
 
-      await prisma.job.update({
-        where: { id: job.id },
-        data: { status: 'FAILED', error: err.message },
-      });
+        await prisma.job.update({
+          where: { id: job.id },
+          data: { status: 'FAILED', error: err.message },
+        });
+      } catch (dbErr) {
+        console.warn('[pipelineOrchestrator] Failed to update DB on error (P2025 or connection closed):', dbErr);
+      }
 
       throw err;
     }
 
     // 3. STAGES: EXTRACTING, ENRICHING, DEDUPLICATING, CRAWLING, AUDITING, VERIFYING, QUALIFYING
-    await prisma.pipelineRun.update({
-      where: { id: pipelineRun.id },
-      data: { stage: 'PROCESSING', recordsProcessed: discoveredCandidates.length },
-    });
+    try {
+      await prisma.pipelineRun.update({
+        where: { id: pipelineRun.id },
+        data: { stage: 'PROCESSING', recordsProcessed: discoveredCandidates.length },
+      });
+    } catch (dbErr) {
+      console.warn('[pipelineOrchestrator] PipelineRun update failed (P2025):', dbErr);
+    }
 
     const processedLeads: Lead[] = [];
     const BATCH_SIZE = 5;
@@ -148,26 +156,30 @@ export class PipelineOrchestrator {
     };
 
     // Complete Job & Pipeline Run in Canonical Database
-    await prisma.pipelineRun.update({
-      where: { id: pipelineRun.id },
-      data: {
-        status: 'COMPLETED',
-        stage: 'COMPLETED',
-        recordsProcessed: discoveredCandidates.length,
-        completedAt: new Date(),
-      },
-    });
+    try {
+      await prisma.pipelineRun.update({
+        where: { id: pipelineRun.id },
+        data: {
+          status: 'COMPLETED',
+          stage: 'COMPLETED',
+          recordsProcessed: discoveredCandidates.length,
+          completedAt: new Date(),
+        },
+      });
 
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: 'COMPLETED',
-        totalDiscovered: discoveredCandidates.length,
-        totalProcessed: processedLeads.length,
-        totalQualified: finalLeads.length,
-        completedAt: new Date(),
-      },
-    });
+      await prisma.job.update({
+        where: { id: job.id },
+        data: {
+          status: 'COMPLETED',
+          totalDiscovered: discoveredCandidates.length,
+          totalProcessed: processedLeads.length,
+          totalQualified: finalLeads.length,
+          completedAt: new Date(),
+        },
+      });
+    } catch (dbErr) {
+      console.warn('[pipelineOrchestrator] Failed to update Job/PipelineRun on completion (P2025):', dbErr);
+    }
 
     return {
       jobId: job.id,

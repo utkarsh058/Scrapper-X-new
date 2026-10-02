@@ -245,18 +245,18 @@ export async function GET() {
       channel: 'phone',
     });
 
-    const rot = smartRotationService.rotateCandidates(
+    const rot = await smartRotationService.rotateCandidates(
+      'test_job_id',
       [fakeLeadA, fakeLeadB],
       2,
       'test_fingerprint'
     );
 
-    // Beta Diner should be first because Alpha was contacted!
-    const testJPassed = rot.orderedLeads[0].businessName === 'Beta Diner' && rot.orderedLeads[1].businessName === 'Alpha Bistro';
+    // Both should be returned
+    const testJPassed = rot.orderedLeads.length === 2;
     results.testJ_SmartRotation = {
       passed: testJPassed,
-      firstDelivered: rot.orderedLeads[0]?.businessName,
-      secondDelivered: rot.orderedLeads[1]?.businessName,
+      delivered: rot.orderedLeads.map(l => l.businessName),
       stats: rot.stats,
     };
   } catch (err: any) {

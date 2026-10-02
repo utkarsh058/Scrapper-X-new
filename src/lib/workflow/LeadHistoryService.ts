@@ -56,10 +56,6 @@ export class LeadHistoryService {
   private attempts: ContactAttemptRecord[] = [];
   private fingerprints: Map<string, SearchFingerprintRecord> = new Map();
 
-  /**
-   * Generates a normalized search fingerprint key.
-   * e.g. "restaurants|uttar-pradesh|noida|phone_or_email|any_website"
-   */
   public generateFingerprintKey(params: {
     country?: string;
     state: string;
@@ -76,6 +72,46 @@ export class LeadHistoryService {
       norm(params.contactFilter || 'all_contacts'),
       norm(params.websiteFilter || 'any_website'),
     ].join('|');
+  }
+
+  /**
+   * Fetches the recently delivered place IDs for a given fingerprint from the database.
+   */
+  public async getRecentDeliveredPlaceIds(fingerprintKey: string, days: number = 7): Promise<Set<string>> {
+    const prisma = (await import('@/lib/prisma')).prisma;
+    const dateLimit = new Date();
+    dateLimit.setDate(dateLimit.getDate() - days);
+
+    const history = await prisma.searchResultHistory.findMany({
+      where: {
+        fingerprintKey,
+        deliveredAt: {
+          gte: dateLimit,
+        }
+      },
+      select: {
+        placeId: true
+      }
+    });
+
+    return new Set(history.map((h: any) => h.placeId));
+  }
+
+  /**
+   * Saves newly delivered candidates to the database for future recent-exclusion.
+   */
+  public async recordDeliveryToDb(fingerprintKey: string, jobId: string, deliveredLeads: { placeId: string, name: string }[]) {
+    if (deliveredLeads.length === 0) return;
+    const prisma = (await import('@/lib/prisma')).prisma;
+    
+    await prisma.searchResultHistory.createMany({
+      data: deliveredLeads.map(lead => ({
+        fingerprintKey,
+        jobId,
+        placeId: lead.placeId,
+        businessName: lead.name,
+      }))
+    });
   }
 
   public getFingerprint(fingerprintKey: string): SearchFingerprintRecord | undefined {

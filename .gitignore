@@ -30,3 +30,5 @@ yarn-error.log*
 *.db-wal
 *.db-shm
 .leadpilot/
+node_modules
+.env*

@@ -529,7 +529,8 @@ export class LeadPilotOrchestrator {
         websiteFilter: criteria.websiteFilter,
       });
 
-      const rotationResult = smartRotationService.rotateCandidates(
+      const rotationResult = await smartRotationService.rotateCandidates(
+        job.id,
         qualifiedEntities,
         job.requestedLeads,
         fingerprintKey,

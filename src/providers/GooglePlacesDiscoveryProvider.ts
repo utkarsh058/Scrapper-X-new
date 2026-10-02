@@ -55,7 +55,11 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
     const startTime = Date.now();
     const resolvedArea = params.city ? `${params.city}, ${params.state}` : params.state;
     const country = 'India'; // LeadPilot is strictly India-only
-    const textQuery = `${params.industry} in ${resolvedArea}, ${country}`;
+    const queries = [
+      `${params.industry} in ${resolvedArea}, ${country}`,
+      `${params.industry} ${resolvedArea}`,
+      `${params.industry} near ${resolvedArea}`
+    ];
 
     if (GooglePlacesDiscoveryProvider.simulateTimeout) {
       return {
@@ -189,7 +193,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
               const fetchStart = Date.now();
 
               const reqPayload: any = {
-                textQuery,
+                textQuery: queries[0],
                 pageSize: 20,
               };
               if (currentPageToken) {
@@ -229,7 +233,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
                   success: false,
                   statusCode: res.status,
                   durationMs,
-                  query: textQuery,
+                  query: queries[0],
                   error: errorMessage,
                 });
 
@@ -244,7 +248,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
                   success: false,
                   statusCode: res.status,
                   durationMs,
-                  query: textQuery,
+                  query: queries[0],
                   error: `Non-JSON response (${contentType})`,
                 });
                 throw new Error(`Google Places API returned non-JSON response (${contentType}): ${raw.slice(0, 300)}`);
@@ -259,7 +263,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
                   success: false,
                   statusCode: res.status,
                   durationMs,
-                  query: textQuery,
+                  query: queries[0],
                   error: 'Invalid JSON payload',
                 });
                 throw new Error(`Google Places API returned invalid JSON: ${raw.slice(0, 300)}`);
@@ -271,7 +275,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
                 success: true,
                 statusCode: res.status,
                 durationMs,
-                query: textQuery,
+                query: queries[0],
               });
 
               return data;
@@ -362,6 +366,112 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
           await new Promise((r) => setTimeout(r, 200));
         }
       } while (nextPageToken && businesses.length < targetPool && pageCount < maxPages);
+      
+      // If candidate pool is still too small, safely iterate over query variations
+      if (businesses.length < targetPool) {
+        let variationIndex = 1; // start from the second query
+        while (businesses.length < targetPool && variationIndex < queries.length) {
+          const currentQuery = queries[variationIndex];
+          variationIndex++;
+          
+          let varNextPageToken: string | undefined = undefined;
+          let varPageCount = 0;
+          const varMaxPages = 2; // Limit variations to 2 pages max
+          
+          do {
+            varPageCount++;
+            pageCount++; // accumulate total page count for diagnostics
+            const currentPageToken: string | undefined = varNextPageToken;
+
+            const varResponseData = await googlePlacesCircuitBreaker.execute(async () => {
+              return await executeWithRetry(
+                async (signal) => {
+                  const url = 'https://places.googleapis.com/v1/places:searchText';
+                  const fetchStart = Date.now();
+                  const reqPayload: any = { textQuery: currentQuery, pageSize: 20 };
+                  if (currentPageToken) reqPayload.pageToken = currentPageToken;
+
+                  const res = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'X-Goog-Api-Key': apiKey,
+                      'X-Goog-FieldMask': fieldMask,
+                    },
+                    body: JSON.stringify(reqPayload),
+                    signal,
+                  });
+
+                  if (!res.ok) throw new Error(`Variation HTTP ${res.status}`);
+                  const data = await res.json();
+                  
+                  googleUsageTracker.recordOperation({
+                    operation: 'TEXT_SEARCH',
+                    success: true,
+                    statusCode: res.status,
+                    durationMs: Date.now() - fetchStart,
+                    query: currentQuery,
+                  });
+                  return data;
+                },
+                { maxRetries: 1, timeoutMs: effectiveTimeout }
+              );
+            });
+
+            const places = varResponseData.places || [];
+            let addedNew = false;
+            for (const p of places) {
+              const placeId = p.id;
+              if (!placeId || seenPlaceIds.has(placeId)) continue;
+              seenPlaceIds.add(placeId);
+              addedNew = true;
+
+              const name = p.displayName?.text || 'Unnamed Business';
+              const address = p.formattedAddress || '';
+              const phone = p.nationalPhoneNumber || p.internationalPhoneNumber;
+              const website = p.websiteUri;
+              const types = p.types || [];
+              const category = p.primaryType || (types.length > 0 ? types[0] : params.industry);
+              const lat = p.location?.latitude;
+              const lon = p.location?.longitude;
+              const mapsUrl = p.googleMapsUri || `https://www.google.com/maps/place/?q=place_id:${placeId}`;
+
+              // Cache place in PlaceCache
+              googleDiscoveryCache.setPlace({
+                placeId, name, address, location: lat && lon ? { latitude: lat, longitude: lon } : undefined,
+                category, phone, websiteUrl: website, lastUpdated: new Date().toISOString(), source: 'google_places',
+              });
+
+              businesses.push({
+                source: 'google_places',
+                sources: ['google_places'],
+                sourceId: placeId,
+                sourceUrl: mapsUrl,
+                confidence: 'high',
+                name, businessName: name, category, address,
+                city: params.city || params.state, state: params.state,
+                latitude: lat, longitude: lon, phone, website, types,
+                rawTags: {
+                  googlePlaceId: placeId, primaryType: p.primaryType, types,
+                  displayName: p.displayName?.text, formattedAddress: p.formattedAddress,
+                  googleMapsUri: p.googleMapsUri, location: p.location,
+                  nationalPhoneNumber: p.nationalPhoneNumber, internationalPhoneNumber: p.internationalPhoneNumber,
+                  websiteUri: p.websiteUri,
+                },
+                sourceEvidence: [{ source: 'google_places', sourceId: placeId, sourceUrl: mapsUrl, rawTags: { googlePlaceId: placeId, types, primaryType: p.primaryType } }],
+              });
+            }
+
+            // Stop paginating this variation early if it yields mostly duplicates
+            if (!addedNew && varPageCount >= 1) break;
+
+            varNextPageToken = varResponseData.nextPageToken;
+            if (varNextPageToken && businesses.length < targetPool && varPageCount < varMaxPages) {
+              await new Promise((r) => setTimeout(r, 200));
+            }
+          } while (varNextPageToken && businesses.length < targetPool && varPageCount < varMaxPages);
+        }
+      }
 
       const durationMs = Date.now() - startTime;
       const rawCount = businesses.length;
@@ -380,9 +490,9 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         statusReason:
           rawCount > 0
             ? `Google Places discovered ${rawCount} real businesses (${pageCount} page${pageCount > 1 ? 's' : ''}) in ${durationMs}ms.`
-            : `Google Places searched successfully but found zero businesses for ${textQuery}.`,
+            : `Google Places searched successfully but found zero businesses for ${queries[0]}.`,
         pagesRequested: pageCount,
-        queryUsed: textQuery,
+        queryUsed: queries[0],
         endpointUsed: 'https://places.googleapis.com/v1/places:searchText',
         durationMs,
       };
