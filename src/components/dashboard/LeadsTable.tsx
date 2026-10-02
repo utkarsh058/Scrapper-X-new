@@ -79,7 +79,10 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
 
   // Multi-Source transparency logic
   const googleCount = providerStats?.googlePlaces?.rawCount ?? 0;
-  const googleStatus = providerStats?.googlePlaces?.status || 'PROVIDER_NOT_CONFIGURED';
+  const googleStatusRaw = providerStats?.googlePlaces?.status;
+  // Only show "Not Configured" if providerStats explicitly says so; otherwise derive from context
+  const googleStatus = googleStatusRaw
+    || (pipelineBreakdown && pipelineBreakdown.rawDiscoveredCount > 0 ? 'COMPLETE' : 'PENDING');
   const osmCount = providerStats?.osm?.rawCount ?? pipelineStats?.rawOsmCount ?? 0;
   const osmStatus = providerStats?.osm?.status || 'NOT_NEEDED';
   const mergedUnique = pipelineBreakdown?.deduplicatedCount ?? pipelineStats?.deduplicatedCount ?? 0;
@@ -429,7 +432,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
               {providerLabel}
             </span>
             <span className="text-slate-600">|</span>
-            <span>Google: <strong className="text-white">{googleStatus === 'PROVIDER_NOT_CONFIGURED' ? 'Not Configured' : googleStatus === 'PROVIDER_FAILURE' || googleStatus === 'FAILED' ? 'Failed' : 'Active'}</strong></span>
+            <span>Google: <strong className="text-white">{googleStatus === 'PROVIDER_NOT_CONFIGURED' ? 'Not Configured' : googleStatus === 'PROVIDER_FAILURE' || googleStatus === 'FAILED' ? 'Failed' : googleStatus === 'PENDING' ? 'Pending' : 'Active'}</strong></span>
             <span>•</span>
             <span>OSM: <strong className="text-white">Supplemental</strong></span>
             <span>•</span>

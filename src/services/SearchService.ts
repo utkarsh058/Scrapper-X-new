@@ -74,8 +74,8 @@ export class SearchService {
       results: frontendLeads,
       summary,
       providerStats: job.providerStats || {
-        googlePlaces: { rawCount: 0, status: 'PROVIDER_NOT_CONFIGURED', durationMs: 0 },
-        osm: { rawCount: job.discovered, status: 'COMPLETE', durationMs: 0 },
+        googlePlaces: { rawCount: job.discovered, status: 'COMPLETE', durationMs: 0 },
+        osm: { rawCount: 0, status: 'NOT_NEEDED', durationMs: 0 },
         web: { rawCount: 0, status: 'NOT_NEEDED', durationMs: 0 },
         directory: { rawCount: 0, status: 'NOT_NEEDED', durationMs: 0 },
       },

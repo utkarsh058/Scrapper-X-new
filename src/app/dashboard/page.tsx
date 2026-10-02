@@ -138,6 +138,7 @@ export default function DashboardPage() {
           contactFilter: criteria.contact,
           websiteFilter: criteria.website,
           limit: criteria.limit,
+          sync: true,
         }),
       });
 
@@ -166,6 +167,7 @@ export default function DashboardPage() {
         setPipelineStats(initialData.pipelineStats || null);
         setProviderStats(initialData.providerStats || null);
         setPipelineBreakdown(initialData.pipelineBreakdown || null);
+        setRotationStats(initialData.rotationStats || null);
         setRejectedCandidates(initialData.rejectedCandidates || []);
         setRejectionReasons(initialData.rejectionReasons || null);
         setStatusReason(initialData.statusReason || null);

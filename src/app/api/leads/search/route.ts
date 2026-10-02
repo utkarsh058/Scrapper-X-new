@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isValidIndianState } from '@/data/indiaLocations';
 import { pipelineOrchestrator } from '@/lib/orchestrator/pipelineOrchestrator';
 import { searchService } from '@/services/SearchService';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,7 +23,7 @@ export async function POST(req: NextRequest) {
     }
 
     const url = new URL(req.url);
-    const isSync = url.searchParams.get('sync') === 'true' || body.sync === true;
+    const isSync = url.searchParams.get('sync') === 'false' || body.sync === false ? false : true;
     const requestedEngine = url.searchParams.get('engine') || body.engine;
 
     const {
