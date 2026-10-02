@@ -29,6 +29,7 @@ export type ContactFilter =
 export type WebsiteFilter =
   | 'Any Website'
   | 'All Websites'
+  | 'Has Website'
   | 'No Website'
   | 'Website Available'
   | 'Working'
@@ -157,14 +158,20 @@ export interface ProviderStats {
 export interface PipelineBreakdown {
   rawDiscoveredCount: number;
   normalizedCount: number;
-  inCityBoundsCount: number;
+  locationCheckedCount?: number;
+  locationVerifiedCount: number;
+  inCityBoundsCount: number; // For backwards compatibility with UI
+  outsideLocationCount: number;
+  unknownLocationCount: number;
   deduplicatedCount: number;
   phoneCount: number;
   emailCount: number;
   phoneOrEmailCount: number;
   websiteAvailableCount: number;
   websiteUnavailableCount: number;
+  verifiedNoWebsiteCount?: number;
   websiteUnreachableCount: number;
+  websiteNeedsImprovementCount?: number;
   finalQualifiedCount: number;
 }
 
@@ -178,7 +185,23 @@ export interface RejectedCandidateItem {
   websiteUrl?: string;
   websiteStatus?: string;
   sources?: string[];
-  rejectionReason: 'NO_CONTACT' | 'HAS_WEBSITE' | 'NO_WEBSITE' | 'WEBSITE_UNREACHABLE' | 'OUTSIDE_LOCATION' | 'DUPLICATE' | 'MISSING_NAME' | 'OTHER';
+  rejectionReason:
+    | 'OUTSIDE_LOCATION'
+    | 'UNKNOWN_LOCATION'
+    | 'DUPLICATE'
+    | 'NO_CONTACT'
+    | 'MISSING_NAME'
+    | 'INVALID_CATEGORY'
+    | 'NO_WEBSITE'
+    | 'HAS_WEBSITE'
+    | 'WEBSITE_UNREACHABLE'
+    | 'WEBSITE_NEEDS_IMPROVEMENT'
+    | 'WEBSITE_FILTER_MISMATCH'
+    | 'AUDIT_FAILED'
+    | 'NOT_QUALIFIED'
+    | 'PROVIDER_ERROR'
+    | 'INVALID_DATA'
+    | 'OTHER';
   rejectionDetails?: string;
 }
 
@@ -267,6 +290,7 @@ export interface Lead {
     contactType?: 'Email + Phone' | 'Phone' | 'Email' | 'None';
   };
   leadScore: number; // 0 - 100
+  scoreBreakdown?: { rule: string; points: number; reason: string }[];
   notes?: string;
   auditIssues?: string[];
   aiOpportunity?: string;

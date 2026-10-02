@@ -159,3 +159,10 @@ export function calculateExplainableLeadScore(inputs: ScoreInputs): LeadScoringR
     evidence,
   };
 }
+
+export {
+  calculateLeadScore,
+  type LeadScoreInput,
+  type LeadScoreResult,
+} from './leadScoreCalculator';
+

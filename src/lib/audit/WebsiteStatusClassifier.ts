@@ -1,7 +1,7 @@
 import { safeFetch } from '../security/ssrfProtection';
 import { leadPilotDb } from '@/db';
 
-export type CanonicalWebsiteFilter = 'ANY' | 'WORKING' | 'UNREACHABLE' | 'NO_WEBSITE' | 'NEEDS_IMPROVEMENT';
+export type CanonicalWebsiteFilter = 'ANY' | 'HAS_WEBSITE' | 'WORKING' | 'UNREACHABLE' | 'NO_WEBSITE' | 'NEEDS_IMPROVEMENT';
 
 export type CanonicalWebsiteStatus = 'WORKING' | 'UNREACHABLE' | 'NO_WEBSITE' | 'NEEDS_IMPROVEMENT';
 
@@ -12,7 +12,8 @@ export function normalizeWebsiteFilter(raw?: string): CanonicalWebsiteFilter {
   if (!raw) return 'ANY';
   const clean = raw.trim().toUpperCase().replace(/[\s_-]+/g, '_');
   if (clean === 'ANY' || clean === 'ANY_WEBSITE' || clean === 'ALL' || clean === 'ALL_WEBSITES') return 'ANY';
-  if (clean === 'WORKING' || clean === 'WORKING_WEBSITE' || clean === 'WEBSITE_AVAILABLE') return 'WORKING';
+  if (clean === 'HAS_WEBSITE' || clean === 'WEBSITE_AVAILABLE' || clean === 'WITH_WEBSITE' || clean === 'WEBSITE_EXISTS') return 'HAS_WEBSITE';
+  if (clean === 'WORKING' || clean === 'WORKING_WEBSITE') return 'WORKING';
   if (clean === 'UNREACHABLE' || clean === 'WEBSITE_UNREACHABLE') return 'UNREACHABLE';
   if (clean === 'NO_WEBSITE' || clean === 'WITHOUT_WEBSITE' || clean === 'NONE') return 'NO_WEBSITE';
   if (clean === 'NEEDS_IMPROVEMENT' || clean === 'NEEDS_WEBSITE_IMPROVEMENT') return 'NEEDS_IMPROVEMENT';
@@ -58,7 +59,7 @@ export async function checkWebsiteReachability(rawUrl: string): Promise<Reachabi
 
   const startTime = Date.now();
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3500);
+  const timeoutId = setTimeout(() => controller.abort(), 2500);
 
   try {
     const res = await safeFetch(url, {
@@ -226,13 +227,49 @@ export function classifyCandidateWebsite(
     };
   }
 
-  // 2. HAS WEBSITE -> EXAMINE REACHABILITY
+  // 2. HAS WEBSITE BUT REQUESTED NO_WEBSITE
+  if (filter === 'NO_WEBSITE') {
+    return {
+      hasWebsite: true,
+      url: cleanUrl,
+      status: reachResult?.isReachable === false ? 'Unreachable' : 'Working',
+      canonicalStatus: reachResult?.isReachable === false ? 'UNREACHABLE' : 'WORKING',
+      detectedIssues: reachResult?.flaws || [],
+      hasEvidenceBackedImprovement: (reachResult?.flaws || []).length > 0,
+      matchesFilter: false,
+      rejectionReason: 'HAS_WEBSITE',
+      rejectionDetails: `Candidate has an active website: ${cleanUrl} (requested filter: NO_WEBSITE)`,
+    };
+  }
+
+  // 3. HAS WEBSITE AND REQUESTED HAS_WEBSITE OR ANY
+  if (filter === 'HAS_WEBSITE' || filter === 'ANY') {
+    const isReachable = reachResult ? reachResult.isReachable : true;
+    const flaws = reachResult?.flaws || [];
+    const status = reachResult
+      ? (!reachResult.isReachable ? 'Unreachable' : flaws.length > 0 ? 'Needs Improvement' : 'Working')
+      : 'Working';
+    const canonicalStatus = reachResult
+      ? (!reachResult.isReachable ? 'UNREACHABLE' : flaws.length > 0 ? 'NEEDS_IMPROVEMENT' : 'WORKING')
+      : 'WORKING';
+    return {
+      hasWebsite: true,
+      url: cleanUrl,
+      status,
+      canonicalStatus,
+      detectedIssues: flaws,
+      hasEvidenceBackedImprovement: flaws.length > 0,
+      matchesFilter: true,
+    };
+  }
+
+  // 4. HAS WEBSITE AND REQUESTED DEEP STATUS (WORKING, UNREACHABLE, NEEDS_IMPROVEMENT)
   const isReachable = reachResult ? reachResult.isReachable : false;
   const flaws = reachResult?.flaws || [];
 
   if (!isReachable) {
-    // Verified Unreachable
-    const matches = filter === 'ANY' || filter === 'UNREACHABLE';
+    // Unreachable
+    const matches = filter === 'UNREACHABLE';
     return {
       hasWebsite: true,
       url: cleanUrl,
@@ -241,14 +278,14 @@ export function classifyCandidateWebsite(
       detectedIssues: [reachResult?.error || 'Website unreachable or server down'],
       hasEvidenceBackedImprovement: false,
       matchesFilter: matches,
-      rejectionReason: matches ? undefined : filter === 'NO_WEBSITE' ? 'HAS_WEBSITE' : 'WEBSITE_UNREACHABLE',
+      rejectionReason: matches ? undefined : 'WEBSITE_UNREACHABLE',
       rejectionDetails: matches
         ? undefined
         : `Website is unreachable (${reachResult?.error || 'error'}) (requested filter: ${filter})`,
     };
   }
 
-  // 3. REACHABLE WEBSITE -> DISTINGUISH WORKING vs NEEDS_IMPROVEMENT
+  // 5. Reachable Website -> evaluate WORKING vs NEEDS_IMPROVEMENT
   const hasFlaws = flaws.length > 0;
 
   if (filter === 'NEEDS_IMPROVEMENT') {
@@ -277,21 +314,7 @@ export function classifyCandidateWebsite(
     }
   }
 
-  // If filter is WORKING
   if (filter === 'WORKING') {
-    return {
-      hasWebsite: true,
-      url: cleanUrl,
-      status: 'Working',
-      canonicalStatus: 'WORKING',
-      detectedIssues: flaws,
-      hasEvidenceBackedImprovement: hasFlaws,
-      matchesFilter: true,
-    };
-  }
-
-  // If filter is NO_WEBSITE
-  if (filter === 'NO_WEBSITE') {
     return {
       hasWebsite: true,
       url: cleanUrl,
@@ -299,13 +322,10 @@ export function classifyCandidateWebsite(
       canonicalStatus: hasFlaws ? 'NEEDS_IMPROVEMENT' : 'WORKING',
       detectedIssues: flaws,
       hasEvidenceBackedImprovement: hasFlaws,
-      matchesFilter: false,
-      rejectionReason: 'HAS_WEBSITE',
-      rejectionDetails: `Candidate has an active, working website: ${cleanUrl} (requested filter: NO_WEBSITE)`,
+      matchesFilter: true,
     };
   }
 
-  // If filter is UNREACHABLE
   if (filter === 'UNREACHABLE') {
     return {
       hasWebsite: true,
@@ -320,14 +340,13 @@ export function classifyCandidateWebsite(
     };
   }
 
-  // Filter is ANY
   return {
     hasWebsite: true,
     url: cleanUrl,
-    status: hasFlaws ? 'Needs Improvement' : 'Working',
-    canonicalStatus: hasFlaws ? 'NEEDS_IMPROVEMENT' : 'WORKING',
-    detectedIssues: flaws,
-    hasEvidenceBackedImprovement: hasFlaws,
+    status: 'Working',
+    canonicalStatus: 'WORKING',
+    detectedIssues: [],
+    hasEvidenceBackedImprovement: false,
     matchesFilter: true,
   };
 }
@@ -345,18 +364,22 @@ export function assertHardGuarantee<T extends { websiteStatus?: string; website?
 
   for (const lead of leads) {
     const status = lead.websiteStatus;
+    const rawWeb = typeof lead.website === 'string' ? lead.website : (lead.website as any)?.url;
+    const hasWeb = Boolean(rawWeb && String(rawWeb).trim().length > 0);
     let ok = false;
 
     if (filter === 'ANY') {
       ok = true;
+    } else if (filter === 'HAS_WEBSITE') {
+      ok = hasWeb && status !== 'No Website' && status !== 'NO_WEBSITE';
     } else if (filter === 'WORKING') {
-      ok = (status === 'Working' || status === 'WORKING') && Boolean(lead.website);
+      ok = (status === 'Working' || status === 'WORKING') && hasWeb;
     } else if (filter === 'UNREACHABLE') {
-      ok = (status === 'Unreachable' || status === 'UNREACHABLE') && Boolean(lead.website);
+      ok = (status === 'Unreachable' || status === 'UNREACHABLE') && hasWeb;
     } else if (filter === 'NO_WEBSITE') {
-      ok = (status === 'No Website' || status === 'NO_WEBSITE') && !lead.website;
+      ok = (status === 'No Website' || status === 'NO_WEBSITE' || !hasWeb) && !hasWeb;
     } else if (filter === 'NEEDS_IMPROVEMENT') {
-      ok = (status === 'Needs Improvement' || status === 'NEEDS_IMPROVEMENT') && Boolean(lead.website);
+      ok = (status === 'Needs Improvement' || status === 'NEEDS_IMPROVEMENT') && hasWeb;
     }
 
     if (ok) {

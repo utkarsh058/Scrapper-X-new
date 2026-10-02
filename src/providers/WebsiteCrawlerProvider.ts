@@ -36,6 +36,7 @@ export interface CrawlResult {
     hasCanonical: boolean;
     hasSchema: boolean;
     hasRobotsMeta: boolean;
+    renderMode?: string;
   };
   crawledAt: string;
 }

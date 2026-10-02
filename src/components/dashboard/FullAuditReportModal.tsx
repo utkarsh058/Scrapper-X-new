@@ -218,7 +218,15 @@ export const FullAuditReportModal: React.FC<FullAuditReportModalProps> = ({
                     </div>
 
                     {[
-                      { title: 'Performance', score: report.scores.performance, sub: report.performance.configured ? 'Google PageSpeed' : 'Not Configured' },
+                      {
+                        title: 'Performance',
+                        score: report.scores.performance,
+                        sub: !report.performance.configured || report.performance.status === 'NOT_CONFIGURED'
+                          ? 'Not Configured'
+                          : report.performance.status === 'COMPLETE'
+                          ? 'Google PageSpeed'
+                          : 'Unavailable',
+                      },
                       { title: 'Mobile', score: report.scores.mobile, sub: report.mobile.viewportConfigured ? 'Viewport Pass' : 'Viewport Fail' },
                       { title: 'SEO', score: report.scores.seo, sub: `${report.seo.h1Tags.length > 0 ? 'H1 Present' : 'Missing H1'}` },
                       { title: 'Conversion', score: report.scores.conversion, sub: `${report.conversion.hasPhoneCta ? 'Phone Active' : 'No Phone'}` },
@@ -304,9 +312,13 @@ export const FullAuditReportModal: React.FC<FullAuditReportModalProps> = ({
                         Real performance benchmarks evaluated directly from Google&apos;s Lighthouse auditing engine.
                       </p>
                     </div>
-                    {report.performance.configured ? (
+                    {report.performance.configured && report.performance.status === 'COMPLETE' ? (
                       <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-semibold">
                         API Connected
+                      </span>
+                    ) : report.performance.configured ? (
+                      <span className="px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[11px] font-semibold">
+                        {report.performance.status === 'UNAVAILABLE' ? 'API Unavailable' : 'API Error'}
                       </span>
                     ) : (
                       <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[11px] font-semibold">
@@ -315,7 +327,7 @@ export const FullAuditReportModal: React.FC<FullAuditReportModalProps> = ({
                     )}
                   </div>
 
-                  {!report.performance.configured ? (
+                  {!report.performance.configured || report.performance.status === 'NOT_CONFIGURED' ? (
                     <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 text-center space-y-3">
                       <Gauge className="h-10 w-10 text-slate-600 mx-auto" />
                       <h4 className="text-base font-bold text-white">Google PageSpeed Insights Not Configured</h4>
@@ -327,6 +339,17 @@ export const FullAuditReportModal: React.FC<FullAuditReportModalProps> = ({
                       </code>
                       <p className="text-[11px] text-slate-500">
                         LeadPilot never shows fake or estimated PageSpeed scores.
+                      </p>
+                    </div>
+                  ) : report.performance.status !== 'COMPLETE' ? (
+                    <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 text-center space-y-3">
+                      <Gauge className="h-10 w-10 text-rose-400 mx-auto" />
+                      <h4 className="text-base font-bold text-white">Google PageSpeed Insights Unavailable</h4>
+                      <p className="text-[12.5px] text-slate-300 max-w-lg mx-auto">
+                        {report.performance.diagnostics || 'Google PageSpeed API request failed or timed out.'}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        LeadPilot preserves your audit without fabricating a numeric score. All other audit dimensions remain verified.
                       </p>
                     </div>
                   ) : (

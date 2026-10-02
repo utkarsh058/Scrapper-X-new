@@ -56,6 +56,10 @@ export interface DiscoveryResult {
     | 'FAILED'
     | 'DISABLED'
     | 'NO_RESULTS'
+    | 'NOT_CONFIGURED'
+    | 'AUTH_FAILED'
+    | 'REQUEST_FAILED'
+    | 'RATE_LIMITED'
     | 'PROVIDER_NOT_CONFIGURED'
     | 'PROVIDER_FAILURE';
   statusReason?: string;

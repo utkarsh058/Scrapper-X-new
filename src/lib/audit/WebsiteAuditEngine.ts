@@ -3,6 +3,7 @@ import { safeFetch, validateUrlForSsrf } from '../security/ssrfProtection';
 import { prisma } from '../prisma';
 import { leadsDb } from '../leadsDb';
 import { leadPilotDb } from '@/db';
+import { isLikelyClientSideSpa, renderPageWithHeadlessBrowser, RenderMode } from '@/lib/browser/headlessRenderer';
 
 export type FindingCategory = 'Performance' | 'SEO' | 'Mobile' | 'UX' | 'Conversion' | 'Technical';
 export type FindingStatus = 'PASS' | 'WARNING' | 'FAIL' | 'NOT_CHECKED' | 'UNAVAILABLE';
@@ -139,6 +140,7 @@ export interface ComprehensiveAuditReport {
       xContentTypeOptions: boolean;
     };
     cachingHeadersPresent: boolean;
+    renderMode?: RenderMode;
   };
 
   technologies: {
@@ -175,6 +177,8 @@ export class WebsiteAuditEngine {
   /**
    * Executes a complete, evidence-based website audit on a real website URL.
    */
+  public auditWebsite = this.audit.bind(this);
+
   public async audit(
     rawUrl: string,
     options: { businessId?: string; leadId?: string; businessName?: string } = {}
@@ -252,8 +256,46 @@ export class WebsiteAuditEngine {
 
     const responseTimeMs = Date.now() - fetchStart;
 
-    // Parse Root HTML with Cheerio
-    const $ = cheerio.load(rootHtml);
+    // 1. FAST PATH: Parse initial Root HTML with Cheerio
+    let $ = cheerio.load(rootHtml);
+    let renderMode: RenderMode = 'HTTP_ONLY';
+
+    // 2. JS FALLBACK: If initial HTML strongly indicates a client-side SPA or missing critical content
+    if (isLikelyClientSideSpa(rootHtml, $)) {
+      renderMode = 'JS_FALLBACK_TRIGGERED';
+      try {
+        const renderResult = await renderPageWithHeadlessBrowser(finalUrl, { timeoutMs: 4500 });
+        if (renderResult.success && renderResult.html) {
+          rootHtml = renderResult.html;
+          $ = cheerio.load(rootHtml);
+          renderMode = 'JS_RENDER_SUCCESS';
+          findings.push({
+            category: 'Technical',
+            check: 'JavaScript Rendering Fallback',
+            status: 'PASS',
+            severity: 'INFO',
+            evidence: `Client-side SPA detected and rendered via headless browser in ${renderResult.durationMs}ms`,
+            url: finalUrl,
+            recommendation: 'Page content was rendered with headless browser. Consider SSR or static pre-rendering for optimal SEO crawlability.',
+            detectedAt: now,
+          });
+        } else {
+          renderMode = renderResult.status === 'JS_RENDER_TIMEOUT' ? 'JS_RENDER_TIMEOUT' : 'JS_RENDER_FAILED';
+          findings.push({
+            category: 'Technical',
+            check: 'JavaScript Rendering Fallback',
+            status: 'WARNING',
+            severity: 'LOW',
+            evidence: `Client-side SPA detected, but headless rendering fallback encountered ${renderResult.status}${renderResult.error ? ` (${renderResult.error})` : ''}; continued audit with server-returned HTML.`,
+            url: finalUrl,
+            recommendation: 'Ensure critical content is present in initial server HTML or optimize script bundle load performance.',
+            detectedAt: now,
+          });
+        }
+      } catch {
+        renderMode = 'JS_RENDER_FAILED';
+      }
+    }
 
     // 2. Technical Checks
     const technicalSec = this.evaluateTechnical({
@@ -264,6 +306,7 @@ export class WebsiteAuditEngine {
       headers: responseHeaders,
       redirectChain,
       $,
+      renderMode,
       now,
     });
     findings.push(...technicalSec.findings);
@@ -386,6 +429,7 @@ export class WebsiteAuditEngine {
     headers: Headers | null;
     redirectChain: string[];
     $: cheerio.CheerioAPI;
+    renderMode?: RenderMode;
     now: string;
   }) {
     const findings: AuditFinding[] = [];
@@ -522,6 +566,7 @@ export class WebsiteAuditEngine {
           xContentTypeOptions: xContent,
         },
         cachingHeadersPresent: cacheControl,
+        renderMode: ctx.renderMode || 'HTTP_ONLY',
       },
       findings,
     };
@@ -1451,13 +1496,13 @@ export class WebsiteAuditEngine {
       };
     }
 
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), 12000);
+
     try {
       const psiEndpoint = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(
         url
       )}&strategy=mobile&key=${psiKey}&category=PERFORMANCE`;
-
-      const controller = new AbortController();
-      const timeoutHandle = setTimeout(() => controller.abort(), 12000);
 
       const res = await safeFetch(psiEndpoint, { signal: controller.signal });
       clearTimeout(timeoutHandle);
@@ -1553,9 +1598,16 @@ export class WebsiteAuditEngine {
         finding: perfFinding,
       };
     } catch (err: any) {
+      clearTimeout(timeoutHandle);
+      const isTimeout =
+        err.name === 'AbortError' ||
+        err.name === 'TimeoutError' ||
+        err.message?.toLowerCase().includes('timeout') ||
+        err.message?.toLowerCase().includes('aborted');
+
       return {
         configured: true,
-        status: 'ERROR' as const,
+        status: isTimeout ? ('UNAVAILABLE' as const) : ('ERROR' as const),
         score: null,
         lcpMs: null,
         inpMs: null,
@@ -1565,15 +1617,19 @@ export class WebsiteAuditEngine {
         tbtMs: null,
         speedIndexMs: null,
         opportunities: [],
-        diagnostics: `PageSpeed query error: ${err.message}`,
+        diagnostics: isTimeout
+          ? 'Google PageSpeed API request timed out after 12000ms'
+          : `PageSpeed query error: ${err.message}`,
         finding: {
           category: 'Performance' as FindingCategory,
           check: 'Google PageSpeed Insights',
           status: 'UNAVAILABLE' as FindingStatus,
           severity: 'INFO' as FindingSeverity,
-          evidence: `Failed to connect to PageSpeed API: ${err.message}`,
+          evidence: isTimeout
+            ? 'PageSpeed API query timed out.'
+            : `Failed to connect to PageSpeed API: ${err.message}`,
           url,
-          recommendation: 'Check network connectivity to Google APIs.',
+          recommendation: 'Check network connectivity to Google APIs and verify quota.',
           detectedAt: now,
         },
       };
@@ -1982,6 +2038,7 @@ export class WebsiteAuditEngine {
           xContentTypeOptions: false,
         },
         cachingHeadersPresent: false,
+        renderMode: 'HTTP_ONLY',
       },
       technologies: [],
       findings: [ctx.finding],

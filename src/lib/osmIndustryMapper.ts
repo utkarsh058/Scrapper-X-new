@@ -101,23 +101,59 @@ export const OSM_INDUSTRY_MAPPINGS: Record<string, OsmTagCondition[]> = {
 
   // 3. Education
   'school': [
-    { key: 'amenity', value: 'school' }
+    { key: 'amenity', value: 'school' },
+    { key: 'building', value: 'school' }
   ],
   'schools': [
-    { key: 'amenity', value: 'school' }
+    { key: 'amenity', value: 'school' },
+    { key: 'building', value: 'school' }
   ],
   'college': [
     { key: 'amenity', value: 'college' },
-    { key: 'amenity', value: 'university' }
+    { key: 'amenity', value: 'university' },
+    { key: 'building', value: 'college' },
+    { key: 'building', value: 'university' }
   ],
   'colleges': [
     { key: 'amenity', value: 'college' },
-    { key: 'amenity', value: 'university' }
+    { key: 'amenity', value: 'university' },
+    { key: 'building', value: 'college' },
+    { key: 'building', value: 'university' }
   ],
   'education': [
     { key: 'amenity', value: 'school' },
     { key: 'amenity', value: 'college' },
-    { key: 'amenity', value: 'university' }
+    { key: 'amenity', value: 'university' },
+    { key: 'amenity', value: 'kindergarten' },
+    { key: 'amenity', value: 'language_school' },
+    { key: 'amenity', value: 'music_school' },
+    { key: 'amenity', value: 'prep_school' },
+    { key: 'amenity', value: 'training' },
+    { key: 'amenity', value: 'research_institute' },
+    { key: 'building', value: 'school' },
+    { key: 'building', value: 'college' },
+    { key: 'building', value: 'university' },
+    { key: 'building', value: 'kindergarten' },
+    { key: 'office', value: 'educational_institution' },
+    { key: 'education', value: 'coaching' },
+    { key: 'education', value: 'tuition' },
+    { key: 'education', value: 'centre' },
+    { key: 'training', value: 'vocational' }
+  ],
+  'coaching': [
+    { key: 'amenity', value: 'prep_school' },
+    { key: 'education', value: 'coaching' },
+    { key: 'education', value: 'tuition' },
+    { key: 'office', value: 'educational_institution' }
+  ],
+  'training': [
+    { key: 'amenity', value: 'training' },
+    { key: 'training', value: 'vocational' },
+    { key: 'amenity', value: 'language_school' }
+  ],
+  'kindergarten': [
+    { key: 'amenity', value: 'kindergarten' },
+    { key: 'building', value: 'kindergarten' }
   ],
 
   // 4. Finance & Utilities

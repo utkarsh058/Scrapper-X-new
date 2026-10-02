@@ -430,20 +430,38 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
             </span>
             <span className="text-slate-600">|</span>
             <span>Google: <strong className="text-white">
-              {googleStatus === 'PROVIDER_NOT_CONFIGURED' || googleStatus === 'DISABLED'
+              {googleStatus === 'PROVIDER_NOT_CONFIGURED' || googleStatus === 'NOT_CONFIGURED' || googleStatus === 'DISABLED'
                 ? 'Not Configured'
-                : googleStatus === 'PROVIDER_FAILURE' || googleStatus === 'FAILED'
+                : googleStatus === 'AUTH_FAILED'
+                ? 'Auth Failed'
+                : googleStatus === 'RATE_LIMITED'
+                ? 'Rate Limited'
+                : googleStatus === 'REQUEST_FAILED' || googleStatus === 'PROVIDER_FAILURE' || googleStatus === 'FAILED'
                 ? 'Failed'
+                : googleStatus === 'NO_RESULTS'
+                ? 'No Results'
                 : googleStatus === 'PENDING'
                 ? 'Pending'
-                : googleStatus === 'UNKNOWN'
-                ? 'Unknown'
                 : googleStatus === 'COMPLETE' || googleStatus === 'SUCCESS' || googleStatus === 'PARTIAL'
-                ? 'Active'
+                ? (googleCount > 0 ? `Active (${googleCount})` : 'Active')
                 : googleStatus}
             </strong></span>
             <span>•</span>
-            <span>OSM: <strong className="text-white">Supplemental</strong></span>
+            <span>OSM: <strong className="text-white">
+              {osmStatus === 'COMPLETE' || osmStatus === 'SUCCESS'
+                ? (osmCount > 0 ? `Active (${osmCount})` : 'Active')
+                : osmStatus === 'NO_RESULTS'
+                ? 'No Results'
+                : osmStatus === 'NOT_CONFIGURED' || osmStatus === 'DISABLED'
+                ? 'Disabled'
+                : osmStatus === 'RATE_LIMITED'
+                ? 'Rate Limited'
+                : osmStatus === 'REQUEST_FAILED' || osmStatus === 'FAILED'
+                ? 'Failed'
+                : osmStatus === 'SUPPLEMENTAL' || osmStatus === 'NOT_NEEDED'
+                ? (osmCount > 0 ? `Active (${osmCount})` : 'Supplemental')
+                : osmStatus}
+            </strong></span>
             <span>•</span>
             <span>Merged: <strong className="text-white">{mergedUnique}</strong></span>
             <span>•</span>
@@ -726,7 +744,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                 </div>
                 <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
                   <div className="text-[#64748B] text-[10.5px]">Location Verified</div>
-                  <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.inCityBoundsCount ?? pipelineStats?.inCityBoundsCount ?? 0}</div>
+                  <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.locationVerifiedCount ?? pipelineBreakdown?.inCityBoundsCount ?? pipelineStats?.inCityBoundsCount ?? 0}</div>
                 </div>
                 <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
                   <div className="text-[#64748B] text-[10.5px]">Deduplicated</div>
@@ -784,6 +802,11 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                 <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-medium">
                   OUTSIDE_LOCATION: <strong>{rejectionReasons?.OUTSIDE_LOCATION ?? 0}</strong>
                 </span>
+                {(rejectionReasons?.UNKNOWN_LOCATION ?? 0) > 0 && (
+                  <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                    UNKNOWN_LOCATION: <strong>{rejectionReasons.UNKNOWN_LOCATION}</strong>
+                  </span>
+                )}
                 <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-medium">
                   DUPLICATE: <strong>{rejectionReasons?.DUPLICATE ?? 0}</strong>
                 </span>

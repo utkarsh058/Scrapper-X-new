@@ -154,23 +154,27 @@ export class ProviderManager {
         }
       } catch (gErr: any) {
         result.latencies.googleMs = Date.now() - gStart;
+        const errMsg = gErr.message || '';
+        const isAuth = errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('API key') || errMsg.includes('PERMISSION_DENIED');
+        const isRate = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED');
+        const status = isAuth ? 'AUTH_FAILED' : isRate ? 'RATE_LIMITED' : 'REQUEST_FAILED';
         result.providers.googlePlaces = {
-          status: 'FAILED',
+          status: status as any,
           rawCount: 0,
           discovered: 0,
           pagesRequested: 1,
           durationMs: result.latencies.googleMs,
-          reason: `Google Places execution failed: ${gErr.message}`,
-          errors: [gErr.message],
+          reason: `Google Places execution failed: ${errMsg}`,
+          errors: [errMsg],
         };
-        onProgress?.(`Google Places encountered an error: ${gErr.message}. Continuing with OpenStreetMap fallback...`);
+        onProgress?.(`Google Places encountered an error (${status}): ${errMsg}. Continuing with OpenStreetMap fallback...`);
       }
     } else {
-      let disabledStatus: 'DISABLED' | 'PROVIDER_NOT_CONFIGURED' | 'PROVIDER_FAILURE' | 'FAILED' = 'DISABLED';
+      let disabledStatus: 'DISABLED' | 'NOT_CONFIGURED' | 'PROVIDER_NOT_CONFIGURED' | 'PROVIDER_FAILURE' | 'FAILED' = 'DISABLED';
       if (!health.googlePlaces.enabled) {
         disabledStatus = 'DISABLED';
       } else if (!health.googlePlaces.configured) {
-        disabledStatus = 'PROVIDER_NOT_CONFIGURED';
+        disabledStatus = 'NOT_CONFIGURED';
       } else {
         disabledStatus = 'PROVIDER_FAILURE';
       }
@@ -191,7 +195,7 @@ export class ProviderManager {
     // Section 1 & 7: OSM remains available as fallback and secondary source.
     // Only invoke OSM if Google failed, returned zero, or returned insufficient candidates
     const isOsmEnabled = health.osm.configured && health.osm.enabled;
-    const googleFailed = ['FAILED', 'DISABLED', 'PROVIDER_NOT_CONFIGURED', 'PROVIDER_FAILURE'].includes(result.providers.googlePlaces.status);
+    const googleFailed = ['FAILED', 'DISABLED', 'NOT_CONFIGURED', 'PROVIDER_NOT_CONFIGURED', 'PROVIDER_FAILURE', 'AUTH_FAILED', 'REQUEST_FAILED', 'RATE_LIMITED', 'NO_RESULTS'].includes(result.providers.googlePlaces.status);
     const needOsm = googleFailed || result.businesses.length < requestedLimit * 1.5;
 
     if (isOsmEnabled && needOsm) {
@@ -227,13 +231,15 @@ export class ProviderManager {
         }
       } catch (oErr: any) {
         result.latencies.osmMs = Date.now() - oStart;
+        const errMsg = oErr.message || '';
+        const isRate = errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('busy');
         result.providers.osm = {
-          status: 'FAILED',
+          status: (isRate ? 'RATE_LIMITED' : 'REQUEST_FAILED') as any,
           rawCount: 0,
           discovered: 0,
           durationMs: result.latencies.osmMs,
-          reason: oErr.message,
-          errors: [oErr.message],
+          reason: errMsg,
+          errors: [errMsg],
         };
       }
     } else if (isOsmEnabled && !needOsm) {

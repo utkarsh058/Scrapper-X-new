@@ -97,7 +97,7 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
     const steps = [
     { 
       label: `Finding businesses in ${activeCity ? `${activeCity}, ` : ''}${selectedState}...`, 
-      desc: 'Querying OpenStreetMap (Overpass API)' 
+      desc: 'Querying Google Places & OpenStreetMap' 
     },
     { 
       label: 'Fetching real business details...', 

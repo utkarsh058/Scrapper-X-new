@@ -26,6 +26,10 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { Lead, OutreachRecord } from '@/types';
+import { getLeadWebsiteStatusBadge, WebsiteBadgeConfig } from '@/utils/statusUtils';
+
+export { getLeadWebsiteStatusBadge };
+export type { WebsiteBadgeConfig };
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -356,27 +360,15 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
                 <span className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wider block mb-1">
                   Website Status
                 </span>
-                {lead.website.status === 'Needs Website Improvement' || lead.website.status === 'Needs Improvement' ? (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                    Needs Improvement
-                  </span>
-                ) : lead.website.status === 'No Website' || !lead.website.hasWebsite ? (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
-                    <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-                    No Website
-                  </span>
-                ) : lead.website.status === 'Website Unreachable' || lead.website.status === 'Unreachable' ? (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wider bg-red-50 text-red-700 border border-red-200">
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                    Unreachable
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    Website Available
-                  </span>
-                )}
+                {(() => {
+                  const badge = getLeadWebsiteStatusBadge(lead);
+                  return (
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wider ${badge.badgeClass}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${badge.dotClass}`} />
+                      {badge.label}
+                    </span>
+                  );
+                })()}
               </div>
             </div>
 

@@ -4,6 +4,7 @@ import { LeadEntity } from './Lead';
 
 export interface RejectionBreakdown {
   OUTSIDE_LOCATION: number;
+  UNKNOWN_LOCATION?: number;
   INVALID_CATEGORY: number;
   MISSING_NAME: number;
   DUPLICATE: number;
@@ -11,6 +12,7 @@ export interface RejectionBreakdown {
   HAS_WEBSITE: number;
   NO_WEBSITE: number;
   WEBSITE_UNREACHABLE: number;
+  WEBSITE_NEEDS_IMPROVEMENT?: number;
   AUDIT_FAILED: number;
   NOT_QUALIFIED: number;
   OTHER: number;
@@ -20,14 +22,20 @@ export interface RejectionBreakdown {
 export interface PipelineBreakdown {
   rawDiscoveredCount: number;
   normalizedCount: number;
+  locationCheckedCount?: number;
   locationVerifiedCount: number;
+  inCityBoundsCount: number;
+  outsideLocationCount: number;
+  unknownLocationCount: number;
   deduplicatedCount: number;
   phoneCount: number;
   emailCount: number;
   phoneOrEmailCount: number;
   websiteAvailableCount: number;
   websiteUnavailableCount: number;
+  verifiedNoWebsiteCount?: number;
   websiteUnreachableCount: number;
+  websiteNeedsImprovementCount?: number;
   finalQualifiedCount: number;
 }
 
@@ -41,7 +49,23 @@ export interface RejectedCandidateItem {
   email?: string;
   websiteUrl?: string;
   websiteStatus?: string;
-  rejectionReason: 'NO_CONTACT' | 'HAS_WEBSITE' | 'NO_WEBSITE' | 'WEBSITE_UNREACHABLE' | 'OUTSIDE_LOCATION' | 'DUPLICATE' | 'MISSING_NAME' | 'OTHER' | 'WEBSITE_FILTER_MISMATCH';
+  rejectionReason:
+    | 'NO_CONTACT'
+    | 'HAS_WEBSITE'
+    | 'NO_WEBSITE'
+    | 'WEBSITE_UNREACHABLE'
+    | 'WEBSITE_NEEDS_IMPROVEMENT'
+    | 'OUTSIDE_LOCATION'
+    | 'UNKNOWN_LOCATION'
+    | 'DUPLICATE'
+    | 'MISSING_NAME'
+    | 'INVALID_CATEGORY'
+    | 'AUDIT_FAILED'
+    | 'NOT_QUALIFIED'
+    | 'PROVIDER_ERROR'
+    | 'INVALID_DATA'
+    | 'OTHER'
+    | 'WEBSITE_FILTER_MISMATCH';
   reason?: string;
   rejectionDetails?: string;
 }

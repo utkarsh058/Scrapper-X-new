@@ -15,6 +15,10 @@ export interface ProviderStat {
     | 'NO_RESULTS'
     | 'NOT_NEEDED'
     | 'SUCCESS'
+    | 'NOT_CONFIGURED'
+    | 'AUTH_FAILED'
+    | 'REQUEST_FAILED'
+    | 'RATE_LIMITED'
     | 'PROVIDER_NOT_CONFIGURED'
     | 'PROVIDER_FAILURE';
   durationMs: number;

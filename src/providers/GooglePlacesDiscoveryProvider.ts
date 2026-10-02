@@ -140,7 +140,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'DISABLED',
+        status: 'NOT_CONFIGURED',
         statusReason: 'GOOGLE_PLACES_NOT_CONFIGURED: Missing GOOGLE_PLACES_API_KEY.',
         pagesRequested: 0,
         errors: ['GOOGLE_PLACES_NOT_CONFIGURED'],
@@ -498,8 +498,12 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
       };
     } catch (err: any) {
       const durationMs = Date.now() - startTime;
-      const isTimeout = err.name === 'AbortError' || err.message?.includes('timeout') || err.message?.includes('timed out');
-      console.warn(`[GooglePlacesDiscoveryProvider] Query failed: ${err.message}`);
+      const errMsg = err.message || '';
+      const isTimeout = err.name === 'AbortError' || errMsg.includes('timeout') || errMsg.includes('timed out');
+      const isAuth = err.status === 401 || err.status === 403 || errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('API key') || errMsg.includes('PERMISSION_DENIED');
+      const isRate = err.status === 429 || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota') || errMsg.includes('QUOTA');
+      const status: 'AUTH_FAILED' | 'RATE_LIMITED' | 'REQUEST_FAILED' = isAuth ? 'AUTH_FAILED' : isRate ? 'RATE_LIMITED' : 'REQUEST_FAILED';
+      console.warn(`[GooglePlacesDiscoveryProvider] Query failed (${status}): ${errMsg}`);
 
       return {
         providerId: this.providerId,
@@ -508,12 +512,16 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'FAILED',
+        status,
         statusReason: isTimeout
           ? `Google Places timed out after ${effectiveTimeout}ms.`
-          : `Google Places provider failure: ${err.message}`,
+          : isAuth
+          ? `Google Places authentication failed: ${errMsg}`
+          : isRate
+          ? `Google Places rate limited or quota exceeded: ${errMsg}`
+          : `Google Places provider failure: ${errMsg}`,
         pagesRequested: 1,
-        errors: [err.message],
+        errors: [errMsg],
         durationMs,
       };
     } finally {

@@ -134,7 +134,10 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
         durationMs,
       };
     } catch (err: any) {
-      console.warn(`[OSMOverpassProvider] OSM query failed or timed out: ${err.message}`);
+      const errMsg = err.message || '';
+      const isRate = errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('busy') || errMsg.includes('Too Many Requests');
+      const status: 'RATE_LIMITED' | 'REQUEST_FAILED' = isRate ? 'RATE_LIMITED' : 'REQUEST_FAILED';
+      console.warn(`[OSMOverpassProvider] OSM query failed (${status}): ${errMsg}`);
       return {
         providerId: this.providerId,
         providerName: this.name,
@@ -142,9 +145,9 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'FAILED',
-        statusReason: `OSM query failed: ${err.message}`,
-        errors: [err.message],
+        status,
+        statusReason: `OSM query failed: ${errMsg}`,
+        errors: [errMsg],
         durationMs: Date.now() - startTime,
       };
     } finally {

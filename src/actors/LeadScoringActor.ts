@@ -2,6 +2,8 @@ import { BaseActor, ActorContext } from '@/models/Actor';
 import { BusinessWithAudit } from './WebsiteAuditActor';
 import { ScoreBreakdownItem } from '@/models/Lead';
 
+import { calculateLeadScore } from '@/lib/scoring/leadScoreCalculator';
+
 export interface BusinessWithScore extends BusinessWithAudit {
   leadScore: number;
   scoreBreakdown: ScoreBreakdownItem[];
@@ -23,74 +25,52 @@ export class LeadScoringActor extends BaseActor<BusinessWithAudit[], BusinessWit
     context.onProgress?.(`Computing evidence-backed commercial opportunity scores...`);
 
     const results: BusinessWithScore[] = businesses.map((b) => {
-      const breakdown: ScoreBreakdownItem[] = [];
-      let score = 20; // Base score for existing registered business
+      const phone = b.phone || (b as any).contacts?.find((c: any) => c.type === 'phone')?.value;
+      const email = b.email || (b as any).contacts?.find((c: any) => c.type === 'email')?.value;
+      const reachStatus = (b.reachability?.status as string) || '';
+      const isUnreachable =
+        reachStatus === 'UNREACHABLE' ||
+        reachStatus === 'DNS_ERROR' ||
+        reachStatus === 'TIMEOUT' ||
+        reachStatus === 'SSL_ERROR';
+      const isWorking =
+        reachStatus === 'FOUND' ||
+        reachStatus === 'LIVE' ||
+        reachStatus === 'Working' ||
+        reachStatus === 'OK';
 
-      if (!b.websiteUrl) {
-        score += 45;
-        breakdown.push({
-          rule: 'NO_WEBSITE',
-          points: 45,
-          reason: 'Business has no digital web presence detected. High opportunity for modern website creation.',
-        });
-      } else {
-        const reachability = b.reachability?.status;
-        if (reachability === 'UNREACHABLE' || reachability === 'DNS_ERROR' || reachability === 'TIMEOUT') {
-          score += 40;
-          breakdown.push({
-            rule: 'WEBSITE_UNREACHABLE',
-            points: 40,
-            reason: `Website is currently unreachable (${reachability}). Urgent recovery/rebuild needed.`,
-          });
-        }
+      const websiteStatus = !b.websiteUrl
+        ? 'No Website'
+        : isUnreachable
+        ? 'Unreachable'
+        : (b.auditResult?.issues?.length || 0) > 0 || (b.auditResult?.overallScore || 100) < 80
+        ? 'Needs Improvement'
+        : isWorking
+        ? 'Working'
+        : 'Working';
 
-        if (b.reachability?.isHttps === false) {
-          score += 20;
-          breakdown.push({
-            rule: 'INSECURE_HTTP',
-            points: 20,
-            reason: 'Website lacks modern SSL/HTTPS encryption.',
-          });
-        }
-
-        const audit = b.auditResult;
-        if (audit) {
-          if (!audit.ux.mobileViewport) {
-            score += 25;
-            breakdown.push({
-              rule: 'NO_MOBILE_VIEWPORT',
-              points: 25,
-              reason: 'Website is not mobile responsive.',
-            });
-          }
-
-          if (!audit.ux.hasPhoneCTA && !audit.ux.hasWhatsAppCTA) {
-            score += 15;
-            breakdown.push({
-              rule: 'NO_CONTACT_CTA',
-              points: 15,
-              reason: 'Homepage lacks direct click-to-call or WhatsApp engagement buttons.',
-            });
-          }
-
-          if (audit.performance.loadTimeMs && audit.performance.loadTimeMs > 2500) {
-            score += 10;
-            breakdown.push({
-              rule: 'SLOW_PAGE_SPEED',
-              points: 10,
-              reason: `Slow initial server load speed (${audit.performance.loadTimeMs}ms).`,
-            });
-          }
-        }
-      }
-
-      // Cap at 99
-      const finalScore = Math.min(Math.max(score, 10), 99);
+      const res = calculateLeadScore({
+        businessName: b.businessName,
+        category: b.category,
+        address: (b as any).address,
+        city: b.city,
+        state: b.state,
+        phone,
+        email,
+        website: b.websiteUrl,
+        websiteStatus,
+        https: b.reachability?.isHttps ?? (b.websiteUrl?.startsWith('https') || false),
+        locationVerificationStatus: (b as any).locationVerificationStatus || 'VERIFIED',
+        businessVerificationStatus: 'VERIFIED',
+        sources: b.sources || (b.source ? [b.source] : ['google_places']),
+        rawTags: b.rawTags,
+        audit: b.auditResult,
+      });
 
       return {
         ...b,
-        leadScore: finalScore,
-        scoreBreakdown: breakdown,
+        leadScore: res.score,
+        scoreBreakdown: res.breakdown,
       };
     });
 
