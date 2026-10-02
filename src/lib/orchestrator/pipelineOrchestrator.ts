@@ -7,6 +7,7 @@ import { phoneValidator } from '../providers/phoneValidationProvider';
 import { calculateExplainableLeadScore } from '../scoring/leadScorer';
 import { DiscoveryCriteria, DiscoveredBusiness } from '../providers/types';
 import { Lead, SearchSummary, WebsiteStatus } from '@/types';
+import { normalizeWebsiteFilter } from '@/lib/audit/WebsiteStatusClassifier';
 
 export interface PipelineExecutionResult {
   jobId: string;
@@ -440,18 +441,17 @@ export class PipelineOrchestrator {
       else if (contactFilter === 'Has Email') matchesContact = hasEmail;
       else if (contactFilter === 'Has Phone') matchesContact = hasPhone;
 
-      // Website filter
-      const hasWebsite = Boolean(lead.websiteUrl);
-      const status = lead.websiteStatus;
-
+      // Canonical Website filter semantics
+      const canonicalFilter = normalizeWebsiteFilter(websiteFilter);
       let matchesWebsite = true;
-      if (websiteFilter === 'No Website') matchesWebsite = !hasWebsite || status === 'No Website';
-      else if (websiteFilter === 'Website Available') matchesWebsite = hasWebsite;
-      else if (websiteFilter === 'Working') matchesWebsite = hasWebsite && (status === 'Working' || status === 'WORKING');
-      else if (websiteFilter === 'Needs Improvement' || websiteFilter === 'Needs Website Improvement') {
-        matchesWebsite = hasWebsite && (status === 'Needs Improvement' || status === 'NEEDS_IMPROVEMENT');
-      } else if (websiteFilter === 'Unreachable' || websiteFilter === 'Website Unreachable') {
-        matchesWebsite = hasWebsite && (status === 'Unreachable' || status === 'UNREACHABLE');
+      if (canonicalFilter === 'WORKING') {
+        matchesWebsite = Boolean(lead.websiteUrl) && (status === 'Working' || status === 'WORKING');
+      } else if (canonicalFilter === 'UNREACHABLE') {
+        matchesWebsite = Boolean(lead.websiteUrl) && (status === 'Unreachable' || status === 'UNREACHABLE');
+      } else if (canonicalFilter === 'NO_WEBSITE') {
+        matchesWebsite = !lead.websiteUrl || status === 'No Website' || status === 'NO_WEBSITE';
+      } else if (canonicalFilter === 'NEEDS_IMPROVEMENT') {
+        matchesWebsite = Boolean(lead.websiteUrl) && (status === 'Needs Improvement' || status === 'NEEDS_IMPROVEMENT');
       }
 
       return matchesContact && matchesWebsite;

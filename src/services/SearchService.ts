@@ -62,11 +62,11 @@ export class SearchService {
       emailAndPhone: frontendLeads.filter((l) => Boolean(l.email && l.phone)).length,
       hasPhoneOrEmail: frontendLeads.filter((l) => Boolean(l.email || l.phone)).length,
       noContact: frontendLeads.filter((l) => !l.email && !l.phone).length,
-      noWebsite: frontendLeads.filter((l) => !l.websiteUrl || l.websiteStatus === 'No Website').length,
-      websiteAvailable: frontendLeads.filter((l) => Boolean(l.websiteUrl) && l.websiteStatus !== 'Unreachable').length,
-      workingWebsite: frontendLeads.filter((l) => l.websiteStatus === 'Working').length,
-      needsImprovement: frontendLeads.filter((l) => l.websiteStatus === 'Needs Improvement').length,
-      unreachable: frontendLeads.filter((l) => l.websiteStatus === 'Unreachable').length,
+      noWebsite: frontendLeads.filter((l) => !l.websiteUrl || l.websiteStatus === 'No Website' || l.websiteStatus === 'NO_WEBSITE').length,
+      websiteAvailable: frontendLeads.filter((l) => Boolean(l.websiteUrl) && (l.websiteStatus === 'Working' || l.websiteStatus === 'WORKING' || l.websiteStatus === 'Needs Improvement' || l.websiteStatus === 'NEEDS_IMPROVEMENT')).length,
+      workingWebsite: frontendLeads.filter((l) => l.websiteStatus === 'Working' || l.websiteStatus === 'WORKING').length,
+      needsImprovement: frontendLeads.filter((l) => l.websiteStatus === 'Needs Improvement' || l.websiteStatus === 'NEEDS_IMPROVEMENT').length,
+      unreachable: frontendLeads.filter((l) => l.websiteStatus === 'Unreachable' || l.websiteStatus === 'UNREACHABLE').length,
     };
 
     return {
@@ -111,7 +111,7 @@ export class SearchService {
         outsideCity: job.rejectionReasons.OUTSIDE_LOCATION,
         duplicate: job.rejectionReasons.DUPLICATE,
         contactFilterExcluded: job.rejectionReasons.NO_CONTACT,
-        websiteFilterExcluded: job.rejectionReasons.NO_WEBSITE + job.rejectionReasons.HAS_WEBSITE,
+        websiteFilterExcluded: (job.rejectionReasons.NO_WEBSITE || 0) + (job.rejectionReasons.HAS_WEBSITE || 0) + (job.rejectionReasons.WEBSITE_FILTER_MISMATCH || 0) + (job.rejectionReasons.WEBSITE_UNREACHABLE || 0),
       },
       rejectionReasons: job.rejectionReasons,
       providers: {

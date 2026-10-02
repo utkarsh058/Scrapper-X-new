@@ -155,18 +155,25 @@ export class SearchPlanner {
       }
 
       // Check website
-      if (normWebsite === 'ANY_WEBSITE') {
-        // Fast pass! Do NOT crawl!
-      } else if (normWebsite === 'WEBSITE_AVAILABLE') {
-        if (!hasWebsite) {
-          return { passed: false, needsBackgroundEnrichment: true, reason: 'WEBSITE_DISCOVERY_NEEDED' };
-        }
+      if (normWebsite === 'ANY_WEBSITE' || normWebsite === 'ANY' || normWebsite === 'ALL_WEBSITES') {
+        // Fast pass!
       } else if (normWebsite === 'NO_WEBSITE') {
         if (hasWebsite) {
           return { passed: false, needsBackgroundEnrichment: false, reason: 'HAS_WEBSITE' };
         }
-        // Candidate has no known website - qualifies for NO_WEBSITE!
         return { passed: true, needsBackgroundEnrichment: false };
+      } else if (normWebsite === 'WORKING' || normWebsite === 'WEBSITE_AVAILABLE' || normWebsite === 'WORKING_WEBSITE') {
+        if (!hasWebsite) {
+          return { passed: false, needsBackgroundEnrichment: false, reason: 'NO_WEBSITE' };
+        }
+      } else if (normWebsite === 'UNREACHABLE' || normWebsite === 'WEBSITE_UNREACHABLE') {
+        if (!hasWebsite) {
+          return { passed: false, needsBackgroundEnrichment: false, reason: 'NO_WEBSITE' };
+        }
+      } else if (normWebsite === 'NEEDS_IMPROVEMENT' || normWebsite === 'NEEDS_WEBSITE_IMPROVEMENT') {
+        if (!hasWebsite) {
+          return { passed: false, needsBackgroundEnrichment: false, reason: 'NO_WEBSITE' };
+        }
       }
 
       return { passed: true, needsBackgroundEnrichment: false };

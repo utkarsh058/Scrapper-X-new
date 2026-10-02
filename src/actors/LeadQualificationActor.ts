@@ -43,34 +43,33 @@ export class LeadQualificationActor extends BaseActor<LeadQualificationInput, Le
   private evaluateWebsite(b: BusinessWithAudit, filter: string = 'Any Website'): { match: boolean; reason?: string } {
     const hasUrl = Boolean(b.websiteUrl);
     const reachability = b.reachability?.status;
-    const norm = filter.toUpperCase().replace(/\s+/g, '_');
+    const isReachable = hasUrl && reachability !== 'UNREACHABLE' && reachability !== 'DNS_ERROR' && reachability !== 'TIMEOUT' && reachability !== 'SSL_ERROR';
+    const isUnreachable = hasUrl && (reachability === 'UNREACHABLE' || reachability === 'DNS_ERROR' || reachability === 'TIMEOUT' || reachability === 'SSL_ERROR');
+    const isNoWebsite = !hasUrl;
 
-    if (norm === 'ANY_WEBSITE' || norm === 'ALL_WEBSITES') return { match: true };
+    const norm = filter.toUpperCase().replace(/[\s_-]+/g, '_');
+
+    if (norm === 'ANY_WEBSITE' || norm === 'ANY' || norm === 'ALL_WEBSITES') return { match: true };
 
     if (norm === 'NO_WEBSITE') {
-      return !hasUrl || reachability === 'UNREACHABLE' || reachability === 'DNS_ERROR'
-        ? { match: true }
-        : { match: false, reason: 'HAS_WEBSITE' };
+      return isNoWebsite ? { match: true } : { match: false, reason: 'HAS_WEBSITE' };
     }
 
-    if (norm === 'WEBSITE_AVAILABLE') {
-      return hasUrl && reachability !== 'UNREACHABLE' && reachability !== 'DNS_ERROR'
-        ? { match: true }
-        : { match: false, reason: 'NO_WEBSITE' };
+    if (norm === 'WORKING' || norm === 'WEBSITE_AVAILABLE' || norm === 'WORKING_WEBSITE') {
+      return isReachable ? { match: true } : { match: false, reason: isNoWebsite ? 'NO_WEBSITE' : 'WEBSITE_UNREACHABLE' };
     }
 
-    if (norm === 'NEEDS_IMPROVEMENT') {
+    if (norm === 'UNREACHABLE' || norm === 'WEBSITE_UNREACHABLE') {
+      return isUnreachable ? { match: true } : { match: false, reason: isNoWebsite ? 'NO_WEBSITE' : 'WEBSITE_WORKING' };
+    }
+
+    if (norm === 'NEEDS_IMPROVEMENT' || norm === 'NEEDS_WEBSITE_IMPROVEMENT') {
       const issues = b.auditResult?.issues || [];
       const score = b.auditResult?.overallScore ?? 100;
-      return hasUrl && (issues.length > 0 || score < 80)
+      const hasFlaws = issues.length > 0 || score < 80;
+      return isReachable && hasFlaws
         ? { match: true }
-        : { match: false, reason: 'AUDIT_FAILED' };
-    }
-
-    if (norm === 'UNREACHABLE') {
-      return hasUrl && (reachability === 'UNREACHABLE' || reachability === 'DNS_ERROR' || reachability === 'TIMEOUT')
-        ? { match: true }
-        : { match: false, reason: 'WEBSITE_UNREACHABLE' };
+        : { match: false, reason: !isReachable ? (isNoWebsite ? 'NO_WEBSITE' : 'WEBSITE_UNREACHABLE') : 'NO_IMPROVEMENT_OPPORTUNITY' };
     }
 
     return { match: true };

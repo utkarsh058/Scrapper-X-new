@@ -11,6 +11,12 @@ import { performanceTracker, SearchTimestamps } from '@/lib/metrics/PerformanceT
 import { backgroundEnrichmentQueue } from '@/lib/queue/BackgroundEnrichmentQueue';
 import { smartRotationService } from '@/lib/workflow/SmartRotationService';
 import { leadHistoryService } from '@/lib/workflow/LeadHistoryService';
+import {
+  normalizeWebsiteFilter,
+  checkBatchReachability,
+  classifyCandidateWebsite,
+  assertHardGuarantee,
+} from '@/lib/audit/WebsiteStatusClassifier';
 
 // Blocking Fast Path Actors
 import { businessDiscoveryActor } from '@/actors/BusinessDiscoveryActor';
@@ -39,6 +45,7 @@ export class LeadPilotOrchestrator {
       AUDIT_FAILED: 0,
       NOT_QUALIFIED: 0,
       OTHER: 0,
+      WEBSITE_FILTER_MISMATCH: 0,
     };
 
     const job: Job = {
@@ -359,8 +366,10 @@ export class LeadPilotOrchestrator {
       job.deduplicatedCount = deduplicationOutput.unique.length;
       job.rejectionReasons.DUPLICATE += deduplicationOutput.duplicatesCount;
 
-      // --- STAGE 5: Fast Filter Evaluation & Progressive Entity Creation ---
-      // Plan filters: FAST vs ENRICHMENT vs DEEP
+      // --- STAGE 5: Real Website Reachability & Contact Qualification ---
+      const userWebsiteFilter = normalizeWebsiteFilter(criteria.websiteFilter);
+      const normContact = (criteria.contactFilter || 'All Contacts').toUpperCase().replace(/[\s_-]+/g, '_');
+
       const plan = searchPlanner.planSearch({
         industry: criteria.industry,
         state: verifiedState,
@@ -374,23 +383,28 @@ export class LeadPilotOrchestrator {
       });
 
       const fastCandidates = deduplicationOutput.unique;
+
+      this.logProgress(
+        job,
+        'reachability',
+        'Testing Website Reachability',
+        `Testing reachability and canonical status for ${fastCandidates.length} discovered candidates (Filter: ${userWebsiteFilter})...`
+      );
+
+      // Collect candidate website URLs and test reachability concurrently
+      const candidateUrls = fastCandidates.map((b) => b.website).filter(Boolean);
+      const reachabilityMap = await checkBatchReachability(candidateUrls);
+
       const qualifiedEntities: LeadEntity[] = [];
       const rejectedCandidatesList: any[] = [];
       let backgroundJobsQueued = 0;
 
       for (const b of fastCandidates) {
-        const evalResult = plan.canPassCheaply(b);
+        // 1. Evaluate Website Reachability & Filter
+        const reachCheck = b.website ? reachabilityMap.get(b.website) : undefined;
+        const webClass = classifyCandidateWebsite(b.website, userWebsiteFilter, reachCheck);
 
-        // Strict filter check: If filter requires verified email or verified no website
-        let enrichmentStatus: 'DISCOVERED' | 'ENRICHING' | 'QUALIFIED' | 'REJECTED' = 'DISCOVERED';
-        if (plan.plannedFilters.strictVerificationRequired) {
-          enrichmentStatus = 'ENRICHING';
-        } else if (evalResult.passed) {
-          enrichmentStatus = 'QUALIFIED';
-        }
-
-        // Check if candidate fails filter requirements
-        if (!evalResult.passed) {
+        if (!webClass.matchesFilter) {
           rejectedCandidatesList.push({
             name: b.businessName,
             category: b.category,
@@ -399,33 +413,66 @@ export class LeadPilotOrchestrator {
             phone: b.phone,
             email: b.email,
             websiteUrl: b.website,
-            rejectionReason: (evalResult.reason as any) || 'NO_CONTACT',
-            rejectionDetails: `Failed search criteria: ${evalResult.reason}`,
+            websiteStatus: webClass.status,
+            rejectionReason: (webClass.rejectionReason as any) || 'WEBSITE_FILTER_MISMATCH',
+            rejectionDetails: webClass.rejectionDetails || `Failed website filter: ${userWebsiteFilter}`,
           });
 
-          if (evalResult.reason === 'HAS_WEBSITE') job.rejectionReasons.HAS_WEBSITE++;
-          else if (evalResult.reason === 'NO_WEBSITE') job.rejectionReasons.NO_WEBSITE++;
-          else if (evalResult.reason === 'NO_CONTACT') job.rejectionReasons.NO_CONTACT++;
+          if (webClass.rejectionReason === 'HAS_WEBSITE') job.rejectionReasons.HAS_WEBSITE++;
+          else if (webClass.rejectionReason === 'NO_WEBSITE') job.rejectionReasons.NO_WEBSITE++;
+          else if (webClass.rejectionReason === 'WEBSITE_UNREACHABLE') job.rejectionReasons.WEBSITE_UNREACHABLE++;
+          else if (webClass.rejectionReason === 'WEBSITE_WORKING') job.rejectionReasons.OTHER++;
+          else if (webClass.rejectionReason === 'NO_IMPROVEMENT_OPPORTUNITY') job.rejectionReasons.AUDIT_FAILED++;
           else job.rejectionReasons.OTHER++;
-
-          // If business has a website and needs background enrichment, queue asynchronously
-          if (b.website && evalResult.needsBackgroundEnrichment) {
-            backgroundEnrichmentQueue.enqueue({
-              leadId: `lead_${b.sourceId ? b.sourceId.replace(/[^a-zA-Z0-9_-]/g, '_') : Date.now()}`,
-              searchId: job.id,
-              type: 'EMAIL_EXTRACTION',
-              priority: 'LOW',
-              provider: 'crawler',
-            });
-            backgroundJobsQueued++;
-          }
 
           continue;
         }
 
+        // 2. Evaluate Contact Filter
+        const hasPhone = Boolean(b.phone && b.phone.trim().length > 0);
+        const hasEmail = Boolean(b.email && b.email.trim().length > 0);
+        let matchesContact = true;
+        let contactRejectionReason = 'NO_CONTACT';
+
+        if (normContact === 'ALL_CONTACTS' || normContact === 'ANY_CONTACT') {
+          matchesContact = true;
+        } else if (normContact === 'PHONE_ONLY') {
+          matchesContact = hasPhone;
+          contactRejectionReason = 'NO_PHONE';
+        } else if (normContact === 'EMAIL_ONLY') {
+          matchesContact = hasEmail;
+          contactRejectionReason = 'NO_EMAIL';
+        } else if (normContact === 'EMAIL_AND_PHONE' || normContact === 'EMAIL_+_PHONE') {
+          matchesContact = hasPhone && hasEmail;
+          contactRejectionReason = 'EMAIL_OR_PHONE_MISSING';
+        } else if (normContact === 'PHONE_OR_EMAIL' || normContact === 'HAS_PHONE_OR_EMAIL') {
+          matchesContact = hasPhone || hasEmail;
+          contactRejectionReason = 'NO_CONTACT';
+        } else if (normContact === 'NO_CONTACT') {
+          matchesContact = !hasPhone && !hasEmail;
+          contactRejectionReason = 'HAS_CONTACT';
+        }
+
+        if (!matchesContact) {
+          rejectedCandidatesList.push({
+            name: b.businessName,
+            category: b.category,
+            city: b.city,
+            state: b.state,
+            phone: b.phone,
+            email: b.email,
+            websiteUrl: b.website,
+            websiteStatus: webClass.status,
+            rejectionReason: contactRejectionReason as any,
+            rejectionDetails: `Failed contact filter: ${criteria.contactFilter}`,
+          });
+          job.rejectionReasons.NO_CONTACT++;
+          continue;
+        }
+
+        // 3. Assemble Qualified Lead Entity with Verified Provenance
         const leadId = `lead_${b.sourceId ? b.sourceId.replace(/[^a-zA-Z0-9_-]/g, '_') : Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
-        // Build strict provenance contacts
         const contacts: ContactItem[] = [];
         if (b.phone) {
           contacts.push({
@@ -490,27 +537,33 @@ export class LeadPilotOrchestrator {
           latitude: b.latitude,
           longitude: b.longitude,
           phone: b.phone,
-          email: b.email, // STRICT: Only populated if discovered from legitimate source, never invented
-          website: b.website,
-          websiteStatus: b.website ? 'Working' : 'No Website',
-          https: b.website ? b.website.startsWith('https') : false,
+          email: b.email,
+          website: webClass.url,
+          websiteStatus: webClass.status,
+          https: reachCheck?.isHttps ?? (webClass.url?.startsWith('https') || false),
           socialLinks: {},
           contacts,
           businessVerificationStatus: 'VERIFIED',
           locationVerificationStatus: 'VERIFIED',
-          auditIssues: [],
+          auditIssues: webClass.detectedIssues.map((issue) => ({ issue, category: 'technical' as const, severity: 'medium' as const, evidence: issue })),
           scoreBreakdown: [],
-          leadScore: b.phone && b.website ? 85 : b.phone ? 70 : 50,
+          leadScore: b.phone && webClass.status === 'Working' ? 85 : b.phone ? 70 : 50,
           sources: resolvedSources,
           sourceEvidence: resolvedEvidence,
-          enrichmentStatus,
-          auditStatus: 'PENDING',
+          enrichmentStatus: 'QUALIFIED',
+          auditStatus: webClass.hasEvidenceBackedImprovement ? 'AUDITED' : 'PENDING',
           googlePlaceId,
           osmId,
           provenance: {
             phone: { value: b.phone, source: resolvedSources.join(', '), verified: Boolean(b.phone) },
-            website: { value: b.website, source: resolvedSources.join(', '), verified: Boolean(b.website) },
-            email: { value: b.email, source: b.email ? (resolvedSources.find((s: string) => s === 'openstreetmap' || s === 'osm') || 'web_search') : 'none', verified: Boolean(b.email) },
+            website: { value: webClass.url, source: resolvedSources.join(', '), verified: Boolean(webClass.url) },
+            email: {
+              value: b.email,
+              source: b.email
+                ? (resolvedSources.find((s: string) => s === 'openstreetmap' || s === 'osm') || 'web_search')
+                : 'none',
+              verified: Boolean(b.email),
+            },
           },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -544,7 +597,18 @@ export class LeadPilotOrchestrator {
         }
       );
 
-      const initialEntities = rotationResult.orderedLeads;
+      // --- STAGE 5.6: Hard Guarantee Assertion ---
+      const { validLeads: strictlyGuaranteedEntities, violationsCount } = assertHardGuarantee(
+        rotationResult.orderedLeads,
+        userWebsiteFilter
+      );
+
+      if (violationsCount > 0) {
+        job.rejectionReasons.WEBSITE_FILTER_MISMATCH =
+          (job.rejectionReasons.WEBSITE_FILTER_MISMATCH || 0) + violationsCount;
+      }
+
+      const initialEntities = strictlyGuaranteedEntities;
       job.rotationStats = rotationResult.stats;
 
       // Queue Background Enrichment for Delivered Leads
@@ -594,12 +658,15 @@ export class LeadPilotOrchestrator {
         }
       }
 
-      // Fast response assembly
+      // Fast response assembly with truthful metrics
       const phoneCount = initialEntities.filter((l) => Boolean(l.phone)).length;
       const emailCount = initialEntities.filter((l) => Boolean(l.email)).length;
       const phoneOrEmailCount = initialEntities.filter((l) => Boolean(l.phone || l.email)).length;
-      const websiteAvailableCount = initialEntities.filter((l) => Boolean(l.website)).length;
-      const noWebsiteCount = initialEntities.filter((l) => !l.website).length;
+      const workingWebsiteCount = initialEntities.filter((l) => l.websiteStatus === 'Working').length;
+      const needsImprovementCount = initialEntities.filter((l) => l.websiteStatus === 'Needs Improvement').length;
+      const unreachableCount = initialEntities.filter((l) => l.websiteStatus === 'Unreachable').length;
+      const noWebsiteCount = initialEntities.filter((l) => l.websiteStatus === 'No Website' || !l.website).length;
+      const websiteAvailableCount = workingWebsiteCount + needsImprovementCount;
 
       job.leads = initialEntities;
       job.verified = initialEntities.length;
@@ -622,7 +689,7 @@ export class LeadPilotOrchestrator {
         phoneOrEmailCount,
         websiteAvailableCount,
         websiteUnavailableCount: noWebsiteCount,
-        websiteUnreachableCount: 0,
+        websiteUnreachableCount: unreachableCount,
         finalQualifiedCount: initialEntities.length,
       };
 

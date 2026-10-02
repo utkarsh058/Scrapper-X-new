@@ -14,6 +14,7 @@ export interface RejectionBreakdown {
   AUDIT_FAILED: number;
   NOT_QUALIFIED: number;
   OTHER: number;
+  WEBSITE_FILTER_MISMATCH?: number;
 }
 
 export interface PipelineBreakdown {
@@ -40,7 +41,7 @@ export interface RejectedCandidateItem {
   email?: string;
   websiteUrl?: string;
   websiteStatus?: string;
-  rejectionReason: 'NO_CONTACT' | 'HAS_WEBSITE' | 'NO_WEBSITE' | 'WEBSITE_UNREACHABLE' | 'OUTSIDE_LOCATION' | 'DUPLICATE' | 'MISSING_NAME' | 'OTHER';
+  rejectionReason: 'NO_CONTACT' | 'HAS_WEBSITE' | 'NO_WEBSITE' | 'WEBSITE_UNREACHABLE' | 'OUTSIDE_LOCATION' | 'DUPLICATE' | 'MISSING_NAME' | 'OTHER' | 'WEBSITE_FILTER_MISMATCH';
   reason?: string;
   rejectionDetails?: string;
 }
