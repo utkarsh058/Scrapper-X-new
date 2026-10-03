@@ -862,6 +862,16 @@ export class LeadPilotOrchestrator {
         }
 
         qualifiedEntities.push(entity);
+
+        // Break early if we have collected enough qualified entities for the requested quota
+        if (qualifiedEntities.length >= Math.max(job.requestedLeads * 2, 25)) {
+          break;
+        }
+
+        // Check search deadline to return what is verified rather than timing out
+        if (Date.now() - timestamps.searchStart > deadlineMs - 3500) {
+          break;
+        }
       }
 
       // --- STAGE 5.5: Smart Rotation & Lead History Prioritization ---

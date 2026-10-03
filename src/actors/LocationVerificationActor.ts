@@ -143,7 +143,7 @@ function isTargetCityMatch(candidateCity: string, reqCity: string): boolean {
   if (cAlias && (r === cAlias || r.includes(cAlias))) return true;
 
   // Substring/word match (e.g. "Thane West" matches "Thane", "Bengaluru South" matches "Bengaluru")
-  if (c.startsWith(r) || containsWord(c, r)) return true;
+  if (c.startsWith(r) || r.startsWith(c) || containsWord(c, r) || containsWord(r, c)) return true;
   return false;
 }
 

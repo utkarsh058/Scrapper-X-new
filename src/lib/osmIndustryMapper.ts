@@ -202,9 +202,77 @@ export const OSM_INDUSTRY_MAPPINGS: Record<string, OsmTagCondition[]> = {
     { key: 'shop', value: 'car' },
     { key: 'shop', value: 'car_repair' }
   ],
+  'automobile dealer': [
+    { key: 'shop', value: 'car' },
+    { key: 'shop', value: 'motorcycle' }
+  ],
+  'car dealer': [
+    { key: 'shop', value: 'car' }
+  ],
+  'repair service': [
+    { key: 'shop', value: 'car_repair' },
+    { key: 'craft', value: 'electronics_repair' },
+    { key: 'craft', value: 'handyman' }
+  ],
   'construction': [
     { key: 'craft', value: 'builder' },
     { key: 'office', value: 'architect' }
+  ],
+  'manufacturing': [
+    { key: 'man_made', value: 'works' },
+    { key: 'landuse', value: 'industrial' },
+    { key: 'industrial', value: 'factory' },
+    { key: 'craft' }
+  ],
+  'manufacturer': [
+    { key: 'man_made', value: 'works' },
+    { key: 'landuse', value: 'industrial' },
+    { key: 'craft' }
+  ],
+  'wholesaler': [
+    { key: 'shop', value: 'wholesale' },
+    { key: 'wholesale', value: 'yes' },
+    { key: 'office', value: 'company' }
+  ],
+  'wholesale': [
+    { key: 'shop', value: 'wholesale' },
+    { key: 'wholesale', value: 'yes' }
+  ],
+  'law firm': [
+    { key: 'office', value: 'lawyer' },
+    { key: 'office', value: 'legal' }
+  ],
+  'lawyer': [
+    { key: 'office', value: 'lawyer' }
+  ],
+  'accounting': [
+    { key: 'office', value: 'accountant' },
+    { key: 'office', value: 'financial' }
+  ],
+  'accountant': [
+    { key: 'office', value: 'accountant' }
+  ],
+  'it company': [
+    { key: 'office', value: 'it' },
+    { key: 'office', value: 'software' },
+    { key: 'office', value: 'company' }
+  ],
+  'it companies': [
+    { key: 'office', value: 'it' },
+    { key: 'office', value: 'software' },
+    { key: 'office', value: 'company' }
+  ],
+  'software': [
+    { key: 'office', value: 'software' },
+    { key: 'office', value: 'it' }
+  ],
+  'marketing agency': [
+    { key: 'office', value: 'advertising' },
+    { key: 'office', value: 'marketing' }
+  ],
+  'marketing': [
+    { key: 'office', value: 'advertising' },
+    { key: 'office', value: 'marketing' }
   ],
   'other': [
     { key: 'office', value: 'company' },

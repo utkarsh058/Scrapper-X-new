@@ -373,16 +373,19 @@ export function validateStateAndCity(
     );
 
     if (!cityMatch) {
-      // Find if this city belongs to another state to give a helpful and accurate error
+      // Find if this city explicitly belongs to another state's curated list to give an accurate warning
       const otherState = INDIAN_STATES_AND_UTS.find(s =>
         s.cities.some(c => c.toLowerCase() === rawClean.toLowerCase() || c.toLowerCase() === cleanCity.toLowerCase())
       );
 
-      const errorMsg = otherState
-        ? `Location mismatch: City "${rawClean}" belongs to "${otherState.name}", not "${stateObj.name}". Please select the correct state.`
-        : `City "${rawClean}" is not a recognized city in "${stateObj.name}". Please select a valid city.`;
+      if (otherState && otherState.name.toLowerCase() !== stateObj.name.toLowerCase()) {
+        const errorMsg = `Location mismatch: City "${rawClean}" belongs to "${otherState.name}", not "${stateObj.name}". Please select the correct state.`;
+        return { valid: false, error: errorMsg };
+      }
 
-      return { valid: false, error: errorMsg };
+      // Location is an unlisted Indian city, town, locality, PIN code, or municipality in the selected state.
+      // Permit it as a valid location to allow pan-India discovery without requiring exhaustive static lists.
+      return { valid: true, matchedState: stateObj.name, matchedCity: rawClean };
     }
 
     return { valid: true, matchedState: stateObj.name, matchedCity: cityMatch };

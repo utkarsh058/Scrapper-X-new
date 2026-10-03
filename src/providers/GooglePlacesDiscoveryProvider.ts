@@ -199,6 +199,14 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
               if (currentPageToken) {
                 reqPayload.pageToken = currentPageToken;
               }
+              if (params.bbox) {
+                reqPayload.locationRestriction = {
+                  rectangle: {
+                    low: { latitude: params.bbox.south, longitude: params.bbox.west },
+                    high: { latitude: params.bbox.north, longitude: params.bbox.east },
+                  },
+                };
+              }
 
               const res = await fetch(url, {
                 method: 'POST',
@@ -390,6 +398,14 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
                   const fetchStart = Date.now();
                   const reqPayload: any = { textQuery: currentQuery, pageSize: 20 };
                   if (currentPageToken) reqPayload.pageToken = currentPageToken;
+                  if (params.bbox) {
+                    reqPayload.locationRestriction = {
+                      rectangle: {
+                        low: { latitude: params.bbox.south, longitude: params.bbox.west },
+                        high: { latitude: params.bbox.north, longitude: params.bbox.east },
+                      },
+                    };
+                  }
 
                   const res = await fetch(url, {
                     method: 'POST',

@@ -851,7 +851,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                             {candidate.category || 'Restaurant'}
                           </td>
                           <td className="px-3 py-2.5 text-[#475569]">
-                            {candidate.city ? `${candidate.city}${candidate.state ? `, ${candidate.state}` : ''}` : 'Greater Noida, Uttar Pradesh'}
+                            {candidate.city ? `${candidate.city}${candidate.state ? `, ${candidate.state}` : ''}` : (candidate.state || 'India')}
                           </td>
                           <td className="px-3 py-2.5 font-mono text-[11px]">
                             {candidate.phone ? (

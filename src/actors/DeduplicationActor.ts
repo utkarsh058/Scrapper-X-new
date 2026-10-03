@@ -22,7 +22,7 @@ export class DeduplicationActor extends BaseActor<VerifiedBusiness[], Deduplicat
     context.onProgress?.(`Deduplicating ${businesses.length} candidate businesses...`);
 
     const seenSourceIds = new Set<string>();
-    const seenLocations = new Map<string, { lat: number; lon: number }>();
+    const seenLocations = new Map<string, { lat: number; lon: number }[]>();
     const unique: VerifiedBusiness[] = [];
     let duplicatesCount = 0;
 
@@ -41,13 +41,14 @@ export class DeduplicationActor extends BaseActor<VerifiedBusiness[], Deduplicat
       let isDuplicateLocation = false;
 
       if (b.latitude && b.longitude) {
-        const existingLoc = seenLocations.get(normalizedName);
-        if (existingLoc) {
-          const latDiff = Math.abs(existingLoc.lat - b.latitude);
-          const lonDiff = Math.abs(existingLoc.lon - b.longitude);
+        const existingLocs = seenLocations.get(normalizedName) || [];
+        for (const loc of existingLocs) {
+          const latDiff = Math.abs(loc.lat - b.latitude);
+          const lonDiff = Math.abs(loc.lon - b.longitude);
           // ~0.0005 degrees is approx 50 meters
           if (latDiff < 0.0005 && lonDiff < 0.0005) {
             isDuplicateLocation = true;
+            break;
           }
         }
       }
@@ -59,7 +60,9 @@ export class DeduplicationActor extends BaseActor<VerifiedBusiness[], Deduplicat
 
       seenSourceIds.add(primaryKey);
       if (b.latitude && b.longitude) {
-        seenLocations.set(normalizedName, { lat: b.latitude, lon: b.longitude });
+        const locList = seenLocations.get(normalizedName) || [];
+        locList.push({ lat: b.latitude, lon: b.longitude });
+        seenLocations.set(normalizedName, locList);
       }
       unique.push(b);
     }

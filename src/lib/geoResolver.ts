@@ -43,8 +43,76 @@ export const STATE_BOUNDS: Record<string, BoundingBox> = {
   'Uttarakhand': { south: 28.70, west: 77.55, north: 31.45, east: 81.05, centerLat: 30.0668, centerLon: 79.0193 },
   'Himachal Pradesh': { south: 30.35, west: 75.60, north: 33.25, east: 79.05, centerLat: 31.1048, centerLon: 77.1734 },
   'Jammu and Kashmir': { south: 32.25, west: 73.40, north: 35.15, east: 76.80, centerLat: 33.7782, centerLon: 76.5762 },
-  'Ladakh': { south: 32.20, west: 75.50, north: 36.00, east: 79.50, centerLat: 34.1526, centerLon: 77.5771 }
+  'Ladakh': { south: 32.20, west: 75.50, north: 36.00, east: 79.50, centerLat: 34.1526, centerLon: 77.5771 },
+  // Northeast & Island UTs completing all 36 States & UTs
+  'Arunachal Pradesh': { south: 26.65, west: 91.50, north: 29.50, east: 97.40, centerLat: 28.2180, centerLon: 94.7278 },
+  'Manipur': { south: 23.83, west: 93.03, north: 25.68, east: 94.78, centerLat: 24.6637, centerLon: 93.9063 },
+  'Meghalaya': { south: 25.02, west: 89.82, north: 26.12, east: 92.80, centerLat: 25.4670, centerLon: 91.3662 },
+  'Mizoram': { south: 21.95, west: 92.25, north: 24.52, east: 93.43, centerLat: 23.1645, centerLon: 92.9376 },
+  'Nagaland': { south: 25.10, west: 93.30, north: 27.05, east: 95.25, centerLat: 26.1584, centerLon: 94.5624 },
+  'Sikkim': { south: 27.05, west: 88.00, north: 28.15, east: 88.95, centerLat: 27.5330, centerLon: 88.5122 },
+  'Tripura': { south: 22.93, west: 91.15, north: 24.53, east: 92.35, centerLat: 23.9408, centerLon: 91.9882 },
+  'Andaman and Nicobar Islands': { south: 6.75, west: 92.20, north: 13.70, east: 94.30, centerLat: 11.7401, centerLon: 92.6586 },
+  'Dadra and Nagar Haveli and Daman and Diu': { south: 20.00, west: 70.80, north: 20.80, east: 73.20, centerLat: 20.4283, centerLon: 72.8397 },
+  'Lakshadweep': { south: 8.25, west: 71.70, north: 12.40, east: 74.00, centerLat: 10.5667, centerLon: 72.6417 }
 };
+
+// Generic pan-India bounding box covering all territories
+export const INDIA_PAN_BOUNDS: BoundingBox = {
+  south: 6.75,
+  west: 68.15,
+  north: 37.10,
+  east: 97.40,
+  centerLat: 20.5937,
+  centerLon: 78.9629,
+};
+
+/**
+ * Splits a large bounding box into overlapping geographic grid cells.
+ * Prevents large-area queries (e.g. Maharashtra, Rajasthan, UP) from collapsing to center-only POIs.
+ */
+export function partitionBoundingBox(
+  bbox: BoundingBox,
+  maxSpanDeg: number = 1.2,
+  overlapRatio: number = 0.15
+): BoundingBox[] {
+  const latSpan = bbox.north - bbox.south;
+  const lonSpan = bbox.east - bbox.west;
+
+  if (latSpan <= maxSpanDeg && lonSpan <= maxSpanDeg) {
+    return [bbox];
+  }
+
+  const numLatSteps = Math.ceil(latSpan / maxSpanDeg);
+  const numLonSteps = Math.ceil(lonSpan / maxSpanDeg);
+
+  const stepLat = latSpan / numLatSteps;
+  const stepLon = lonSpan / numLonSteps;
+  const overlapLat = stepLat * overlapRatio;
+  const overlapLon = stepLon * overlapRatio;
+
+  const partitions: BoundingBox[] = [];
+
+  for (let i = 0; i < numLatSteps; i++) {
+    for (let j = 0; j < numLonSteps; j++) {
+      const south = Math.max(bbox.south, bbox.south + i * stepLat - overlapLat);
+      const north = Math.min(bbox.north, bbox.south + (i + 1) * stepLat + overlapLat);
+      const west = Math.max(bbox.west, bbox.west + j * stepLon - overlapLon);
+      const east = Math.min(bbox.east, bbox.west + (j + 1) * stepLon + overlapLon);
+
+      partitions.push({
+        south,
+        west,
+        north,
+        east,
+        centerLat: (south + north) / 2,
+        centerLon: (west + east) / 2,
+      });
+    }
+  }
+
+  return partitions;
+}
 
 // Known tight bounding boxes for major Indian cities
 // Specifically calibrated to prevent bleeding into adjacent cities
@@ -201,8 +269,8 @@ export async function resolveIndiaLocation(
     }
   }
 
-  // 3. Fallback: Default to central Delhi
-  return STATE_BOUNDS['Delhi'];
+  // 3. Fallback: Generic India bounding box (replaces city-specific Delhi fallback)
+  return INDIA_PAN_BOUNDS;
 }
 
 /**
