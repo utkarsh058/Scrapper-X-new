@@ -164,6 +164,10 @@ export interface PipelineBreakdown {
   outsideLocationCount: number;
   unknownLocationCount: number;
   deduplicatedCount: number;
+  queuedCount?: number;
+  processedCount?: number;
+  notProcessedCount?: number;
+  notProcessedBeforeDeadlineCount?: number;
   phoneCount: number;
   emailCount: number;
   phoneOrEmailCount: number;
@@ -173,6 +177,7 @@ export interface PipelineBreakdown {
   websiteUnreachableCount: number;
   websiteNeedsImprovementCount?: number;
   finalQualifiedCount: number;
+  deliveredCount?: number;
 }
 
 export interface RejectedCandidateItem {
@@ -201,7 +206,11 @@ export interface RejectedCandidateItem {
     | 'NOT_QUALIFIED'
     | 'PROVIDER_ERROR'
     | 'INVALID_DATA'
-    | 'OTHER';
+    | 'OTHER'
+    | 'CONTACT_FILTER_MISMATCH'
+    | 'NOT_PROCESSED_BEFORE_DEADLINE'
+    | 'TRANSIENT_FAILURE'
+    | 'FILTER_MISMATCH';
   rejectionDetails?: string;
 }
 

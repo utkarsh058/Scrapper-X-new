@@ -18,6 +18,9 @@ export interface RejectionBreakdown {
   OTHER: number;
   WEBSITE_FILTER_MISMATCH?: number;
   CONTACT_FILTER_MISMATCH?: number;
+  NOT_PROCESSED_BEFORE_DEADLINE?: number;
+  TRANSIENT_FAILURE?: number;
+  FILTER_MISMATCH?: number;
 }
 
 export interface PipelineBreakdown {
@@ -29,6 +32,10 @@ export interface PipelineBreakdown {
   outsideLocationCount: number;
   unknownLocationCount: number;
   deduplicatedCount: number;
+  queuedCount?: number;
+  processedCount?: number;
+  notProcessedCount?: number;
+  notProcessedBeforeDeadlineCount?: number;
   phoneCount: number;
   emailCount: number;
   phoneOrEmailCount: number;
@@ -38,6 +45,7 @@ export interface PipelineBreakdown {
   websiteUnreachableCount: number;
   websiteNeedsImprovementCount?: number;
   finalQualifiedCount: number;
+  deliveredCount?: number;
 }
 
 export interface RejectedCandidateItem {
@@ -66,7 +74,11 @@ export interface RejectedCandidateItem {
     | 'PROVIDER_ERROR'
     | 'INVALID_DATA'
     | 'OTHER'
-    | 'WEBSITE_FILTER_MISMATCH';
+    | 'WEBSITE_FILTER_MISMATCH'
+    | 'CONTACT_FILTER_MISMATCH'
+    | 'NOT_PROCESSED_BEFORE_DEADLINE'
+    | 'TRANSIENT_FAILURE'
+    | 'FILTER_MISMATCH';
   reason?: string;
   rejectionDetails?: string;
 }

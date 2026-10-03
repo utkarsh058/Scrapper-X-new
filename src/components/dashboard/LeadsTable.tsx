@@ -343,7 +343,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
           </h2>
           {hasSearched && !isSearching && leads.length > 0 && (
             <p className="text-[12px] text-[#64748B] mt-0.5">
-              {leads.length} {leads.length === 1 ? 'real business' : 'real businesses'} discovered via OpenStreetMap & Website Audit
+              {leads.length} {leads.length === 1 ? 'real business' : 'real businesses'} discovered via Google Places, OpenStreetMap & Website Audit
             </p>
           )}
         </div>

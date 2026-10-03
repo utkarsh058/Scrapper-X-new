@@ -82,6 +82,10 @@ export class LeadPilotOrchestrator {
       NOT_QUALIFIED: 0,
       OTHER: 0,
       WEBSITE_FILTER_MISMATCH: 0,
+      CONTACT_FILTER_MISMATCH: 0,
+      NOT_PROCESSED_BEFORE_DEADLINE: 0,
+      TRANSIENT_FAILURE: 0,
+      FILTER_MISMATCH: 0,
     };
 
     const job: Job = {
@@ -217,6 +221,7 @@ export class LeadPilotOrchestrator {
             const locVer = job.locationVerifiedCount || 0;
             const outLoc = job.rejectionReasons?.OUTSIDE_LOCATION || 0;
             const unkLoc = job.rejectionReasons?.UNKNOWN_LOCATION || 0;
+            const unproc = job.rejectionReasons?.NOT_PROCESSED_BEFORE_DEADLINE || Math.max(0, (job.deduplicated || 0) - (job.leads || []).length);
             job.pipelineBreakdown = {
               rawDiscoveredCount: job.discovered || 0,
               normalizedCount: job.normalizedCount || job.discovered || 0,
@@ -226,6 +231,10 @@ export class LeadPilotOrchestrator {
               outsideLocationCount: outLoc,
               unknownLocationCount: unkLoc,
               deduplicatedCount: job.deduplicated || 0,
+              queuedCount: job.deduplicated || 0,
+              processedCount: Math.max(0, (job.deduplicated || 0) - unproc),
+              notProcessedCount: unproc,
+              notProcessedBeforeDeadlineCount: unproc,
               phoneCount: job.phoneCount || 0,
               emailCount: job.emailCount || 0,
               phoneOrEmailCount: job.phoneOrEmailCount || 0,
@@ -234,6 +243,7 @@ export class LeadPilotOrchestrator {
               verifiedNoWebsiteCount: job.noWebsiteCount || 0,
               websiteUnreachableCount: 0,
               finalQualifiedCount: (job.leads || []).length,
+              deliveredCount: (job.leads || []).length,
             };
           }
 
@@ -607,7 +617,16 @@ export class LeadPilotOrchestrator {
       const qualifiedEntities: LeadEntity[] = [];
       let backgroundJobsQueued = 0;
 
-      for (const b of contactPassedCandidates) {
+      // --- STAGE 5.3: High-Throughput Bounded Concurrent Candidate Processing (Section J & K) ---
+      const CONCURRENCY = Math.min(
+        Number(process.env.CANDIDATE_PROCESSING_CONCURRENCY) || 12,
+        20
+      );
+      const targetQualifiedQuota = Math.max(job.requestedLeads * 2, 25);
+      const evaluatedIndices = new Set<number>();
+      let candidateQueueIndex = 0;
+
+      const evaluateCandidate = async (b: typeof fastCandidates[0], bIndex: number): Promise<LeadEntity | null> => {
         // Evaluate Website Reachability & Filter
         const reachCheck = b.website ? reachabilityMap.get(b.website) : undefined;
         const webClass = classifyCandidateWebsite(b.website, userWebsiteFilter, reachCheck);
@@ -633,7 +652,7 @@ export class LeadPilotOrchestrator {
           else if (webClass.rejectionReason === 'NO_IMPROVEMENT_OPPORTUNITY') job.rejectionReasons.AUDIT_FAILED++;
           else job.rejectionReasons.OTHER++;
 
-          continue;
+          return null;
         }
 
         // Assemble Qualified Lead Entity with Verified Provenance
@@ -647,10 +666,10 @@ export class LeadPilotOrchestrator {
           ? 'official_website'
           : b.source || 'google_places';
 
-        // --- Contact Enrichment & Verification Pipeline ---
+        // --- Contact Enrichment & Verification Pipeline with Filter-Aware Optimization ---
         let enrichmentOutput: ContactEnrichmentOutput | undefined;
         try {
-          enrichmentOutput = await contactEnrichmentPipeline.enrichAndVerify({
+          const enrichPromise = contactEnrichmentPipeline.enrichAndVerify({
             businessId: leadId,
             businessName: b.businessName,
             phone: b.phone,
@@ -658,6 +677,7 @@ export class LeadPilotOrchestrator {
             websiteUrl: b.website,
             source: emailSource,
             sourceUrl: (b as any).emailSourceUrl || b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
+            contactFilter: criteria.contactFilter,
             crawlResult: (b as any).crawlResult ? {
               extractedEmails: (b as any).crawlResult.extractedEmails || [],
               extractedPhones: (b as any).crawlResult.extractedPhones || [],
@@ -666,6 +686,15 @@ export class LeadPilotOrchestrator {
               socialLinks: (b as any).crawlResult.socialLinks,
               ctas: (b as any).crawlResult.ctas,
             } : undefined,
+          });
+
+          // Bounded per-candidate timeout: 3500ms
+          let timeoutHandle: NodeJS.Timeout | undefined;
+          const timeoutPromise = new Promise<undefined>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve(undefined), 3500);
+          });
+          enrichmentOutput = await Promise.race([enrichPromise, timeoutPromise]).finally(() => {
+            if (timeoutHandle) clearTimeout(timeoutHandle);
           });
         } catch {
           // Non-fatal: enrichment failure does not reject the lead
@@ -866,19 +895,87 @@ export class LeadPilotOrchestrator {
           if (job.rejectionReasons.CONTACT_FILTER_MISMATCH !== undefined) {
             job.rejectionReasons.CONTACT_FILTER_MISMATCH++;
           }
-          continue;
+          return null;
         }
 
-        qualifiedEntities.push(entity);
+        return entity;
+      };
 
-        // Break early if we have collected enough qualified entities for the requested quota
-        if (qualifiedEntities.length >= Math.max(job.requestedLeads * 2, 25)) {
-          break;
+      // Worker loop executing bounded concurrent processing with error isolation and deadline control
+      const worker = async () => {
+        while (true) {
+          if (qualifiedEntities.length >= targetQualifiedQuota) {
+            break;
+          }
+          if (Date.now() - timestamps.searchStart > deadlineMs - 2500) {
+            break;
+          }
+
+          const idx = candidateQueueIndex++;
+          if (idx >= contactPassedCandidates.length) {
+            break;
+          }
+
+          evaluatedIndices.add(idx);
+          const candidate = contactPassedCandidates[idx];
+
+          try {
+            const entity = await evaluateCandidate(candidate, idx);
+            if (entity) {
+              qualifiedEntities.push(entity);
+            }
+          } catch (evalErr: any) {
+            rejectedCandidatesList.push({
+              name: candidate.businessName,
+              category: candidate.category,
+              city: candidate.city,
+              state: candidate.state,
+              phone: candidate.phone,
+              email: candidate.email,
+              websiteUrl: candidate.website,
+              websiteStatus: candidate.website ? 'Working' : 'No Website',
+              rejectionReason: 'TRANSIENT_FAILURE' as any,
+              rejectionDetails: evalErr.message || 'Transient error during candidate evaluation',
+            });
+            job.rejectionReasons.OTHER++;
+            if (job.rejectionReasons.TRANSIENT_FAILURE !== undefined) {
+              job.rejectionReasons.TRANSIENT_FAILURE++;
+            }
+          }
         }
+      };
 
-        // Check search deadline to return what is verified rather than timing out
-        if (Date.now() - timestamps.searchStart > deadlineMs - 3500) {
-          break;
+      const workerCount = Math.min(CONCURRENCY, contactPassedCandidates.length);
+      if (workerCount > 0) {
+        this.logProgress(
+          job,
+          'orchestrator',
+          'Concurrent Candidate Qualification',
+          `Evaluating ${contactPassedCandidates.length} candidate businesses with ${workerCount} concurrent workers...`,
+          contactPassedCandidates.length
+        );
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      }
+
+      // Truthful Candidate Accounting (Sections E & F):
+      // Any candidate not processed before the deadline must be recorded with NOT_PROCESSED_BEFORE_DEADLINE,
+      // NOT converted to NO_CONTACT or silently dropped!
+      for (let i = 0; i < contactPassedCandidates.length; i++) {
+        if (!evaluatedIndices.has(i)) {
+          const unproc = contactPassedCandidates[i];
+          rejectedCandidatesList.push({
+            name: unproc.businessName,
+            category: unproc.category,
+            city: unproc.city,
+            state: unproc.state,
+            phone: unproc.phone,
+            email: unproc.email,
+            websiteUrl: unproc.website,
+            websiteStatus: unproc.website ? 'Working' : 'No Website',
+            rejectionReason: 'NOT_PROCESSED_BEFORE_DEADLINE' as any,
+            rejectionDetails: 'Candidate evaluation deferred because global search deadline was reached.',
+          });
+          job.rejectionReasons.NOT_PROCESSED_BEFORE_DEADLINE = (job.rejectionReasons.NOT_PROCESSED_BEFORE_DEADLINE || 0) + 1;
         }
       }
 
@@ -989,6 +1086,7 @@ export class LeadPilotOrchestrator {
       job.noWebsiteCount = noWebsiteCount;
       job.backgroundJobsQueued = backgroundJobsQueued;
 
+      const unprocBeforeDeadline = job.rejectionReasons.NOT_PROCESSED_BEFORE_DEADLINE || 0;
       job.pipelineBreakdown = {
         rawDiscoveredCount: job.discovered,
         normalizedCount: businessVerificationOutput.verified.length,
@@ -998,6 +1096,10 @@ export class LeadPilotOrchestrator {
         outsideLocationCount: locationOutput.rejected.length,
         unknownLocationCount: locationOutput.unknown.length,
         deduplicatedCount: deduplicationOutput.unique.length,
+        queuedCount: fastCandidates.length,
+        processedCount: Math.max(0, fastCandidates.length - unprocBeforeDeadline),
+        notProcessedCount: unprocBeforeDeadline,
+        notProcessedBeforeDeadlineCount: unprocBeforeDeadline,
         phoneCount,
         emailCount,
         phoneOrEmailCount,
@@ -1007,6 +1109,7 @@ export class LeadPilotOrchestrator {
         websiteUnreachableCount: unreachableCount,
         websiteNeedsImprovementCount: needsImprovementCount,
         finalQualifiedCount: initialEntities.length,
+        deliveredCount: initialEntities.length,
       };
 
       job.rejectedCandidates = [

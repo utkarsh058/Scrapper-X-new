@@ -204,13 +204,13 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
             </span>
           </h2>
           <p className="text-[12.5px] text-[#64748B] mt-0.5">
-            Discover real businesses in India via OpenStreetMap (Overpass API). Audits websites for technical problems and extracts public contact details.
+            Discover real businesses across India using Google Places as the primary source, with OpenStreetMap as a secondary supplemental source.
           </p>
         </div>
 
         <div className="flex items-center gap-1.5 self-start sm:self-auto text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 rounded-lg">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-          <span>OpenStreetMap + Overpass</span>
+          <span>Google Places + OpenStreetMap</span>
         </div>
       </div>
 

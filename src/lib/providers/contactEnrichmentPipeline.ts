@@ -29,6 +29,7 @@ import {
   ContactVerificationStatus,
   ContactQualityAssessment,
   assessContactQuality,
+  normalizeContactFilter,
 } from './contactTypes';
 import { phoneVerificationService, PhoneVerificationResult } from './phoneVerificationProvider';
 import { emailVerificationService, EmailVerificationResult } from './emailVerificationProvider2';
@@ -51,6 +52,8 @@ export interface ContactEnrichmentInput {
   // Source provenance
   source: string;          // google_places | osm | stored
   sourceUrl?: string;
+  contactFilter?: string;  // user requested contact filter for filter-aware optimization
+  skipWebsiteEmailExtraction?: boolean;
   // Crawl results (if website was crawled)
   crawlResult?: {
     extractedEmails: string[];
@@ -277,8 +280,30 @@ export class ContactEnrichmentPipeline {
     }
 
     // ─── TIER 3: Live website email extraction (if no email from Tier 1/2) ──
+    const hasPhone = rawContacts.some(c => c.contactType === 'PHONE');
     const hasEmail = rawContacts.some(c => c.contactType === 'EMAIL');
-    if (!hasEmail && input.websiteUrl) {
+
+    // Filter-Aware Optimization (Section K):
+    // If the candidate already has a valid phone, and the user's filter is satisfied by a phone
+    // (e.g. Phone or Email, Phone Only, All Contacts, Verified Phone, Verified Phone or Email),
+    // do not perform slow blocking website crawling on the critical path.
+    const normFilter = input.contactFilter ? normalizeContactFilter(input.contactFilter) : undefined;
+    const phoneSatisfiesFilter = hasPhone && (
+      !normFilter ||
+      normFilter === 'PHONE_OR_EMAIL' ||
+      normFilter === 'PHONE_ONLY' ||
+      normFilter === 'ALL_CONTACTS' ||
+      normFilter === 'VERIFIED_PHONE' ||
+      normFilter === 'VERIFIED_PHONE_OR_EMAIL'
+    );
+
+    const shouldExtractWebsiteEmail =
+      !input.skipWebsiteEmailExtraction &&
+      !hasEmail &&
+      Boolean(input.websiteUrl) &&
+      !phoneSatisfiesFilter;
+
+    if (shouldExtractWebsiteEmail && input.websiteUrl) {
       try {
         const extraction = await extractEmailsFromWebsite(input.websiteUrl);
         for (const email of extraction.emails) {
