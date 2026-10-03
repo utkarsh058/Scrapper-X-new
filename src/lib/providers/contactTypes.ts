@@ -28,6 +28,18 @@ export type ContactVerificationStatus =
   | 'VOIP'
   | 'UNAVAILABLE';    // Provider not configured or failed
 
+// ─── Provider Operational Status ────────────────────────────
+
+export type ProviderOperationalStatus =
+  | 'READY'
+  | 'NOT_CONFIGURED'
+  | 'RATE_LIMITED'
+  | 'TIMEOUT'
+  | 'AUTH_FAILED'
+  | 'PROVIDER_ERROR'
+  | 'QUOTA_EXCEEDED'
+  | 'UNAVAILABLE';
+
 // ─── Verification Level ─────────────────────────────────────
 
 export type VerificationLevel =
