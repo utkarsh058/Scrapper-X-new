@@ -639,6 +639,14 @@ export class LeadPilotOrchestrator {
         // Assemble Qualified Lead Entity with Verified Provenance
         const leadId = `lead_${b.sourceId ? b.sourceId.replace(/[^a-zA-Z0-9_-]/g, '_') : Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
+        const emailSource = (b as any).emailSourceUrl
+          ? 'official_website'
+          : b.source === 'osm' || b.source === 'openstreetmap'
+          ? 'openstreetmap'
+          : b.email
+          ? 'official_website'
+          : b.source || 'google_places';
+
         // --- Contact Enrichment & Verification Pipeline ---
         let enrichmentOutput: ContactEnrichmentOutput | undefined;
         try {
@@ -648,8 +656,8 @@ export class LeadPilotOrchestrator {
             phone: b.phone,
             email: b.email,
             websiteUrl: b.website,
-            source: b.source || 'google_places',
-            sourceUrl: b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
+            source: emailSource,
+            sourceUrl: (b as any).emailSourceUrl || b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
             crawlResult: (b as any).crawlResult ? {
               extractedEmails: (b as any).crawlResult.extractedEmails || [],
               extractedPhones: (b as any).crawlResult.extractedPhones || [],
