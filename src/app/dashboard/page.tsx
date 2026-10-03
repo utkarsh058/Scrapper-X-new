@@ -19,6 +19,8 @@ import { CampaignsView } from '@/components/views/CampaignsView';
 import { AIMessagesView } from '@/components/views/AIMessagesView';
 import { DemoWebsitesView } from '@/components/views/DemoWebsitesView';
 import { SettingsView } from '@/components/views/SettingsView';
+import { SalesAssistantDrawer } from '@/components/assistant/SalesAssistantDrawer';
+import { Bot } from 'lucide-react';
 
 
 import { NavTab, Lead, ToastMessage, ContactFilter, WebsiteFilter, NumberOfLeads, SearchSummary, SearchStatusType, PipelineStats, ProviderStats, PipelineBreakdown, RejectedCandidateItem } from '@/types';
@@ -64,6 +66,7 @@ export default function DashboardPage() {
   const [isQuickAuditModalOpen, setIsQuickAuditModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportSelectedLeads, setExportSelectedLeads] = useState<Lead[]>([]);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
 
   // Search lifecycle states
   const [hasSearched, setHasSearched] = useState(false);
@@ -544,6 +547,22 @@ export default function DashboardPage() {
 
       {/* Toast Notification Container */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      {/* Floating AI Sales Assistant Button */}
+      <button
+        onClick={() => setIsAssistantOpen(true)}
+        className="fixed bottom-6 right-6 z-40 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-3 rounded-full shadow-2xl flex items-center gap-2.5 font-bold text-xs tracking-tight transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer border border-white/20"
+        title="Open AI Sales Copilot"
+      >
+        <Bot className="w-4 h-4 text-blue-200" />
+        <span>AI Sales Copilot</span>
+      </button>
+
+      {/* Sales Assistant Drawer */}
+      <SalesAssistantDrawer
+        isOpen={isAssistantOpen}
+        onClose={() => setIsAssistantOpen(false)}
+      />
     </div>
   );
 }

@@ -41,6 +41,11 @@ model Business {
   verifications    VerificationResult[]
   websites         Website[]
   audits           WebsiteAudit[]
+  campaignLeads    CampaignLead[]
+  inboundReplies   InboundReply[]
+  emailEvents      EmailEvent[]
+  meetings         Meeting[]
+  demos            WebsiteDemo[]
 
   @@index([city, state])
   @@index([industry])
@@ -248,6 +253,8 @@ model Outreach {
   business           Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   campaign           Campaign?          @relation(fields: [campaignId], references: [id])
   auditLogs          OutreachAuditLog[]
+  inboundReplies     InboundReply[]
+  emailEvents        EmailEvent[]
 
   @@index([businessId])
   @@index([campaignId])
@@ -256,13 +263,20 @@ model Outreach {
 }
 
 model Campaign {
-  id          String     @id @default(cuid())
-  name        String
-  description String?
-  status      String     @default("ACTIVE")
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  outreaches  Outreach[]
+  id            String         @id @default(cuid())
+  name          String
+  description   String?
+  status        String         @default("ACTIVE")
+  scheduleType  String         @default("IMMEDIATE")
+  dailyLimit    Int            @default(50)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  outreaches    Outreach[]
+  campaignLeads CampaignLead[]
+  steps         CampaignStep[]
+  replies       InboundReply[]
+  events        EmailEvent[]
+  meetings      Meeting[]
 }
 
 model SuppressionList {
@@ -352,3 +366,148 @@ model SearchResultHistory {
   @@index([placeId])
   @@index([deliveredAt])
 }
+
+model CampaignLead {
+  id                String    @id @default(cuid())
+  campaignId        String
+  leadId            String
+  status            String    @default("PENDING") // PENDING | IN_PROGRESS | PAUSED | STOPPED | COMPLETED | FAILED
+  currentStep       Int       @default(0)
+  stopReason        String?   // INTERESTED | NOT_INTERESTED | UNSUBSCRIBE | BOUNCED | MEETING_BOOKED | MANUAL | OOO
+  customSubject     String?
+  customBody        String?
+  aiPersonalization String?   // JSON metadata
+  lastContactedAt   DateTime?
+  nextFollowupAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  campaign          Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead              Business  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, leadId])
+  @@index([campaignId])
+  @@index([leadId])
+  @@index([status])
+  @@index([nextFollowupAt])
+}
+
+model CampaignStep {
+  id                   String   @id @default(cuid())
+  campaignId           String
+  stepNumber           Int      // 1, 2, 3...
+  delayDays            Int      @default(0) // days after previous step
+  channel              String   @default("EMAIL")
+  templateSubject      String?
+  templateBody         String
+  useAiPersonalization Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  campaign             Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, stepNumber])
+  @@index([campaignId])
+}
+
+model InboundReply {
+  id                   String    @id @default(cuid())
+  campaignId           String?
+  leadId               String?
+  outreachId           String?
+  provider             String    // resend | sendgrid | inbound_smtp | generic
+  providerEventId      String?
+  messageId            String?
+  threadId             String?
+  inReplyTo            String?
+  fromEmail            String
+  toEmail              String
+  subject              String
+  bodyText             String
+  bodyHtml             String?
+  classification       String    @default("UNKNOWN") // INTERESTED | NOT_INTERESTED | QUESTION | OOO | NEEDS_INFO | WRONG_PERSON | UNSUBSCRIBE | BOUNCE | NEGOTIATION | MEETING_REQUEST | UNKNOWN
+  confidence           Float     @default(0.0)
+  classificationReason String?
+  actionTaken          String?   // STOPPED_CAMPAIGN | SCHEDULED_MEETING | CREATED_DRAFT | RESCHEDULED_OOO | SUPPRESSED | HUMAN_REVIEW
+  aiDraftResponse      String?
+  isApproved           Boolean   @default(false)
+  receivedAt           DateTime  @default(now())
+  createdAt            DateTime  @default(now())
+  campaign             Campaign? @relation(fields: [campaignId], references: [id])
+  lead                 Business? @relation(fields: [leadId], references: [id])
+  outreach             Outreach? @relation(fields: [outreachId], references: [id])
+  meetings             Meeting[]
+
+  @@index([campaignId])
+  @@index([leadId])
+  @@index([outreachId])
+  @@index([classification])
+  @@index([fromEmail])
+}
+
+model EmailEvent {
+  id              String    @id @default(cuid())
+  campaignId      String?
+  leadId          String?
+  outreachId      String?
+  eventType       String    // EMAIL_QUEUED | EMAIL_SENT | EMAIL_DELIVERED | EMAIL_BOUNCED | EMAIL_OPENED | EMAIL_CLICKED | EMAIL_RECEIVED | REPLY_CLASSIFIED | MEETING_BOOKED | MEETING_COMPLETED | LEAD_CONVERTED
+  provider        String?
+  providerEventId String?
+  metadata        String?
+  createdAt       DateTime  @default(now())
+  campaign        Campaign? @relation(fields: [campaignId], references: [id])
+  lead            Business? @relation(fields: [leadId], references: [id])
+  outreach        Outreach? @relation(fields: [outreachId], references: [id])
+
+  @@index([campaignId])
+  @@index([leadId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model Meeting {
+  id               String        @id @default(cuid())
+  leadId           String
+  campaignId       String?
+  replyId          String?
+  title            String
+  status           String        @default("REQUESTED") // REQUESTED | PROPOSED | SCHEDULED | RESCHEDULED | CANCELLED | COMPLETED | NO_SHOW
+  startTime        DateTime?
+  endTime          DateTime?
+  timeZone         String        @default("Asia/Kolkata")
+  meetingUrl       String?
+  calendarProvider String?       // google_calendar | internal
+  calendarEventId  String?
+  attendeeEmail    String
+  attendeeName     String?
+  notes            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  lead             Business      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaign         Campaign?     @relation(fields: [campaignId], references: [id])
+  reply            InboundReply? @relation(fields: [replyId], references: [id])
+
+  @@index([leadId])
+  @@index([campaignId])
+  @@index([status])
+}
+
+model WebsiteDemo {
+  id                  String   @id @default(cuid())
+  leadId              String
+  previewSlug         String   @unique
+  businessName        String
+  industry            String
+  originalUrl         String?
+  status              String   @default("GENERATING") // REQUESTED | GENERATING | BUILDING | READY | FAILED | EXPIRED
+  htmlContent         String?
+  cssContent          String?
+  previewUrl          String?
+  improvementsApplied String?  // JSON array of audit issues addressed
+  errorMessage        String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  lead                Business @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([previewSlug])
+  @@index([status])
+}
+

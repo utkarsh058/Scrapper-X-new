@@ -12,7 +12,9 @@ import {
   Smartphone, 
   Laptop,
   Plus,
-  AlertCircle
+  AlertCircle,
+  Loader2,
+  CheckCircle2
 } from 'lucide-react';
 import { Lead } from '@/types';
 
@@ -30,6 +32,8 @@ export const DemoWebsitesView: React.FC<DemoWebsitesViewProps> = ({
   const [deviceMode, setDeviceMode] = useState<'desktop' | 'mobile'>('desktop');
   const [leads, setLeads] = useState<Lead[]>(propsLeads || []);
   const [selectedDemoLead, setSelectedDemoLead] = useState<Lead | null>(null);
+  const [generatedDemo, setGeneratedDemo] = useState<any | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     if (propsLeads && propsLeads.length > 0) {
@@ -49,32 +53,71 @@ export const DemoWebsitesView: React.FC<DemoWebsitesViewProps> = ({
       .catch(() => {});
   }, [propsLeads]);
 
+  // When selected lead changes, check or auto-generate demo
+  useEffect(() => {
+    if (!selectedDemoLead) {
+      setGeneratedDemo(null);
+      return;
+    }
+
+    // Auto-generate if not already generated
+    const generate = async () => {
+      setIsGenerating(true);
+      try {
+        const res = await fetch('/api/demo/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ leadId: selectedDemoLead.id }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setGeneratedDemo(data);
+        } else {
+          setGeneratedDemo(null);
+        }
+      } catch {
+        setGeneratedDemo(null);
+      } finally {
+        setIsGenerating(false);
+      }
+    };
+
+    generate();
+  }, [selectedDemoLead?.id]);
+
   const demoProspects = useMemo(() => {
-    return leads.filter((l) => !l.websiteUrl || l.websiteStatus === 'Needs Improvement' || l.websiteStatus === 'No Website');
+    return leads.filter((l) => !l.websiteUrl || l.websiteStatus === 'Needs Improvement' || l.websiteStatus === 'No Website' || l.websiteStatus === 'Needs Website Improvement');
   }, [leads]);
 
-  const copyDemoLink = (id: string, e: React.MouseEvent) => {
+  const copyDemoLink = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(`https://leadpilot.app/preview/${id}`);
-    onShowToast('Concept Link Copied', `Client concept link copied for cold outreach.`, 'success');
+    if (!generatedDemo?.previewUrl) return;
+    const fullUrl = `${window.location.origin}${generatedDemo.previewUrl}`;
+    navigator.clipboard.writeText(fullUrl);
+    onShowToast('Hosted Preview Link Copied', fullUrl, 'success');
   };
 
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="space-y-5 animate-fade-in font-sans">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-lg border border-[#E5E7EB] shadow-subtle">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
         <div>
-          <h1 className="text-[16px] font-bold text-[#171717]">Client Demo Website Prototypes</h1>
-          <p className="text-[12px] text-[#6B7280]">
-            Interactive personalized landing page prototypes built to showcase during cold outreach for leads needing modernization.
+          <div className="flex items-center gap-2">
+            <h1 className="text-base font-bold text-slate-900 tracking-tight">AI Website Demo Engine</h1>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+              Hosted Previews Active
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Generates high-converting, mobile-first website redesign concepts strictly grounded in each lead's audit findings.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center border border-[#D1D5DB] rounded-md bg-white p-0.5 text-[11.5px]">
+          <div className="flex items-center border border-slate-300 rounded-lg bg-white p-0.5 text-xs">
             <button
               onClick={() => setDeviceMode('desktop')}
-              className={`flex items-center gap-1 px-2 py-1 rounded transition-colors cursor-pointer ${
-                deviceMode === 'desktop' ? 'bg-teal-50 text-teal-800 font-semibold' : 'text-[#6B7280]'
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                deviceMode === 'desktop' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-500'
               }`}
             >
               <Laptop className="h-3.5 w-3.5" />
@@ -82,8 +125,8 @@ export const DemoWebsitesView: React.FC<DemoWebsitesViewProps> = ({
             </button>
             <button
               onClick={() => setDeviceMode('mobile')}
-              className={`flex items-center gap-1 px-2 py-1 rounded transition-colors cursor-pointer ${
-                deviceMode === 'mobile' ? 'bg-teal-50 text-teal-800 font-semibold' : 'text-[#6B7280]'
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                deviceMode === 'mobile' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-500'
               }`}
             >
               <Smartphone className="h-3.5 w-3.5" />
@@ -96,16 +139,16 @@ export const DemoWebsitesView: React.FC<DemoWebsitesViewProps> = ({
       {/* Main Grid View */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: Discovered Prospects Needing Website */}
-        <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-subtle p-4 space-y-3">
-          <div className="flex items-center justify-between border-b border-[#F1F3F5] pb-2">
-            <h3 className="text-[13.5px] font-bold text-[#171717]">Prototype Prospects</h3>
-            <span className="rounded-full bg-teal-50 text-teal-800 px-2 py-0.5 text-[11px] font-semibold border border-teal-200">
-              {demoProspects.length} high-need leads
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Prospects Needing Redesign</h3>
+            <span className="rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[11px] font-semibold border border-blue-200">
+              {demoProspects.length} leads
             </span>
           </div>
 
           {demoProspects.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-[12px]">
+            <div className="p-8 text-center text-slate-500 text-xs">
               No businesses currently selected. Run a search to populate verified businesses that need modern websites.
             </div>
           ) : (
@@ -116,14 +159,14 @@ export const DemoWebsitesView: React.FC<DemoWebsitesViewProps> = ({
                   <div
                     key={lead.id}
                     onClick={() => setSelectedDemoLead(lead)}
-                    className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
                       isSelected
-                        ? 'border-teal-600 bg-teal-50/50 shadow-xs'
-                        : 'border-[#E5E7EB] hover:border-slate-300 bg-white'
+                        ? 'border-blue-600 bg-blue-50/50 shadow-xs'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <span className="font-semibold text-[13px] text-[#171717] leading-snug">
+                      <span className="font-bold text-xs text-slate-900 leading-snug">
                         {lead.businessName}
                       </span>
                       <span className="text-[10px] uppercase font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 shrink-0">
@@ -131,12 +174,12 @@ export const DemoWebsitesView: React.FC<DemoWebsitesViewProps> = ({
                       </span>
                     </div>
 
-                    <div className="text-[11.5px] text-[#6B7280] mt-1">
+                    <div className="text-[11px] text-slate-500 mt-1">
                       <span>{lead.industry}</span> • <span>{lead.location.city}</span>
                     </div>
 
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 text-[11px]">
-                      <span className="text-teal-800 font-medium">Opportunity Score: {lead.leadScore}/100</span>
+                      <span className="text-blue-700 font-semibold">Opportunity: {lead.leadScore}/100</span>
                       <span className="text-slate-400">Click to preview concept</span>
                     </div>
                   </div>
@@ -149,100 +192,75 @@ export const DemoWebsitesView: React.FC<DemoWebsitesViewProps> = ({
         {/* Right: Live Interactive Concept Sandbox */}
         <div className="lg:col-span-2">
           {!selectedDemoLead ? (
-            <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-subtle p-16 text-center text-slate-500 text-[13px]">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-16 text-center text-slate-500 text-xs">
               Select a business on the left to preview an interactive concept.
             </div>
           ) : (
-            <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-subtle overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
               {/* Browser chrome header */}
-              <div className="bg-slate-900 px-4 py-2 flex items-center justify-between text-white text-[12px]">
+              <div className="bg-slate-900 px-4 py-2.5 flex items-center justify-between text-white text-xs">
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1.5">
                     <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />
                     <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
                     <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
                   </div>
-                  <span className="text-slate-400 font-mono text-[11px] ml-2">LeadPilot Prototype Engine</span>
+                  <span className="text-slate-400 font-mono text-[11px] ml-2">LeadPilot Demo Engine</span>
                 </div>
-                <div className="bg-slate-800 px-3 py-0.5 rounded text-[11px] text-slate-300 font-mono">
-                  preview/{selectedDemoLead.id}
+                <div className="bg-slate-800 px-3 py-0.5 rounded text-[11px] text-slate-300 font-mono truncate max-w-xs">
+                  {generatedDemo?.previewUrl || `/demo/preview/${selectedDemoLead.id}`}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={(e) => copyDemoLink(selectedDemoLead.id, e)}
-                    className="text-teal-400 hover:text-teal-300 flex items-center gap-1 text-[11px] cursor-pointer"
-                  >
-                    <Copy className="h-3 w-3" />
-                    <span>Copy Link</span>
-                  </button>
+                  {generatedDemo?.previewUrl && (
+                    <>
+                      <button
+                        onClick={copyDemoLink}
+                        className="text-blue-400 hover:text-blue-300 flex items-center gap-1 text-[11px] font-semibold cursor-pointer"
+                        title="Copy hosted URL"
+                      >
+                        <Copy className="h-3 w-3" />
+                        <span>Copy Link</span>
+                      </button>
+                      <a
+                        href={generatedDemo.previewUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 text-[11px] font-semibold cursor-pointer"
+                        title="Open hosted preview in full tab"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        <span>Full Tab</span>
+                      </a>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Real Data Rendered Prototype */}
-              <div
-                className={`p-8 bg-[#F8FAFC] flex justify-center min-h-[460px] ${
-                  deviceMode === 'mobile'
-                    ? 'max-w-xs mx-auto border-x border-[#E2E8F0] shadow-lg my-4 rounded-xl'
-                    : ''
-                }`}
-              >
-                <div className="w-full space-y-6 text-center">
-                  {/* Navbar mockup */}
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                    <span className="font-bold text-slate-900 text-[13px] tracking-tight">
-                      {selectedDemoLead.businessName}
-                    </span>
-                    <div className="flex items-center gap-3 text-[11.5px] text-slate-600">
-                      <span className="hover:text-teal-700 cursor-pointer">Services</span>
-                      <span className="hover:text-teal-700 cursor-pointer">About</span>
-                      <button className="rounded bg-teal-700 px-2.5 py-1 text-[11px] text-white font-medium">
-                        Book Online
-                      </button>
-                    </div>
+              {/* Rendered View */}
+              <div className="bg-slate-950 p-4 flex justify-center items-center min-h-[500px]">
+                {isGenerating ? (
+                  <div className="text-center text-slate-400 space-y-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-blue-500 mx-auto" />
+                    <div className="text-xs font-semibold">Generating tailored redesign from audit findings...</div>
                   </div>
-
-                  {/* Hero section with real business attributes */}
-                  <div className="py-6 space-y-3">
-                    <span className="inline-block rounded-full bg-teal-50 border border-teal-200 px-3 py-0.5 text-[10.5px] font-semibold text-teal-800">
-                      Top Rated {selectedDemoLead.category} in {selectedDemoLead.location.city}
-                    </span>
-                    <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
-                      Professional {selectedDemoLead.category} Services Built For You
-                    </h2>
-                    <p className="text-[12.5px] text-slate-600 max-w-md mx-auto leading-relaxed">
-                      Instant online booking, mobile-first appointment confirmation, and direct inquiries.
-                    </p>
-
-                    <div className="pt-3 flex flex-wrap items-center justify-center gap-2.5">
-                      <button className="rounded-md bg-teal-700 hover:bg-teal-800 px-4 py-2 text-[12px] font-semibold text-white shadow-sm">
-                        Select Appointment Time
-                      </button>
-                      {selectedDemoLead.phone && (
-                        <button className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50">
-                          Call {selectedDemoLead.phone}
-                        </button>
-                      )}
-                    </div>
+                ) : generatedDemo?.htmlContent ? (
+                  <div
+                    className={`w-full bg-white rounded-lg overflow-hidden shadow-2xl transition-all duration-300 ${
+                      deviceMode === 'mobile' ? 'max-w-sm h-[560px]' : 'max-w-full h-[560px]'
+                    }`}
+                  >
+                    <iframe
+                      srcDoc={generatedDemo.htmlContent}
+                      title={`Preview for ${selectedDemoLead.businessName}`}
+                      className="w-full h-full border-0"
+                      sandbox="allow-scripts allow-same-origin allow-popups"
+                    />
                   </div>
-
-                  {/* Trust badges */}
-                  <div className="p-4 rounded-lg bg-white border border-slate-200 grid grid-cols-3 gap-3 text-left">
-                    <div>
-                      <span className="text-[10.5px] text-slate-500 block">Location</span>
-                      <span className="text-[12px] font-bold text-slate-900">
-                        {selectedDemoLead.location.city}, {selectedDemoLead.location.state || 'India'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[10.5px] text-slate-500 block">Mobile Optimized</span>
-                      <span className="text-[12px] font-bold text-teal-800">100% Responsive</span>
-                    </div>
-                    <div>
-                      <span className="text-[10.5px] text-slate-500 block">Direct Booking</span>
-                      <span className="text-[12px] font-bold text-slate-900">Enabled</span>
-                    </div>
+                ) : (
+                  <div className="text-center text-slate-400 text-xs">
+                    Failed to render concept. Click below to retry.
                   </div>
-                </div>
+                )}
               </div>
             </div>
           )}
