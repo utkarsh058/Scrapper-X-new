@@ -472,15 +472,19 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
 
           <div className="flex items-center gap-2.5">
             {rejectedCandidates && rejectedCandidates.length > 0 && (
+
+
               <button
                 type="button"
                 onClick={() => setShowAuditPanel(!showAuditPanel)}
-                className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors flex items-center gap-1 cursor-pointer border border-slate-700"
+                className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700"
+                title="View detailed pipeline audit & candidate diagnostics"
               >
-                <span>Rejections ({rejectedCandidates.length})</span>
+                <span>View Search Details ({rejectedCandidates.length})</span>
                 {showAuditPanel ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </button>
             )}
+
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ${
               searchStatus === 'COMPLETE' ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
             }`}>
@@ -496,8 +500,9 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
         <div className="bg-[#0F172A] text-slate-200 border-b border-slate-800 p-5 space-y-4 text-[12px] animate-fade-in">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-white text-[13px] uppercase tracking-wider flex items-center gap-2">
-              Pipeline Candidate Rejection Audit ({rejectedCandidates.length} evaluated)
+              Search Diagnostics &amp; Candidate Audit ({rejectedCandidates.length} evaluated)
             </h4>
+
             <button
               onClick={() => setShowAuditPanel(false)}
               className="text-slate-400 hover:text-white text-[11px]"

@@ -9,6 +9,7 @@ import { googlePlacesCircuitBreaker } from '@/lib/resilience/CircuitBreaker';
 import { googleDiscoveryCache } from '@/lib/cache/GoogleDiscoveryCache';
 import { semaphores, getTimeoutConfig } from '@/lib/config/concurrencyConfig';
 import { executeWithRetry } from '@/lib/utils/retryUtils';
+import { getIndustryDiscoveryQueries } from '@/lib/taxonomy/industryTaxonomy';
 
 export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider {
   readonly providerId = 'google_places';
@@ -55,11 +56,8 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
     const startTime = Date.now();
     const resolvedArea = params.city ? `${params.city}, ${params.state}` : params.state;
     const country = 'India'; // LeadPilot is strictly India-only
-    const queries = [
-      `${params.industry} in ${resolvedArea}, ${country}`,
-      `${params.industry} ${resolvedArea}`,
-      `${params.industry} near ${resolvedArea}`
-    ];
+    const queries = getIndustryDiscoveryQueries(params.industry, resolvedArea, country);
+
 
     if (GooglePlacesDiscoveryProvider.simulateTimeout) {
       return {
@@ -168,8 +166,9 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
     }
 
     const fieldMask = this.getFieldMask();
-    const targetPool = Math.max((params.limit || 20) * 3, 60);
+    const targetPool = Math.max(params.limit || 60, 40);
     const timeouts = getTimeoutConfig();
+
     const effectiveTimeout = Math.max(timeouts.googlePlacesFastMs || 8000, 5000);
 
     // 3. Concurrency Semaphore acquisition
@@ -384,7 +383,8 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
           
           let varNextPageToken: string | undefined = undefined;
           let varPageCount = 0;
-          const varMaxPages = 2; // Limit variations to 2 pages max
+          const varMaxPages = Math.min(Math.max(Math.ceil((targetPool - businesses.length) / 20), 1), 3);
+
           
           do {
             varPageCount++;

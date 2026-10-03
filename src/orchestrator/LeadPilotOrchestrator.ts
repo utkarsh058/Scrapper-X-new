@@ -18,7 +18,9 @@ import {
   assertHardGuarantee,
 } from '@/lib/audit/WebsiteStatusClassifier';
 import { extractBatchEmailsForCandidates } from '@/utils/emailUtils';
+import { normalizePhone } from '@/utils/phoneUtils';
 import { calculateLeadScore } from '@/lib/scoring/leadScoreCalculator';
+
 import { contactEnrichmentPipeline, ContactEnrichmentOutput } from '@/lib/providers/contactEnrichmentPipeline';
 import { normalizeContactFilter, evaluateContactFilter, assessContactQuality, CanonicalContact } from '@/lib/providers/contactTypes';
 
@@ -192,8 +194,9 @@ export class LeadPilotOrchestrator {
    * Bounded by global search deadline (default LEAD_SEARCH_DEADLINE_MS = 8000ms, Section 13).
    */
   public async executeJob(jobId: string): Promise<Job> {
-    const deadlineMs = Number(process.env.LEAD_SEARCH_DEADLINE_MS) || 25000;
+    const deadlineMs = Number(process.env.LEAD_SEARCH_DEADLINE_MS) || 45000;
     let timeoutHandle: NodeJS.Timeout | undefined;
+
 
     const deadlinePromise = new Promise<{ deadlineReached: true }>((resolve) => {
       timeoutHandle = setTimeout(() => resolve({ deadlineReached: true }), deadlineMs);
@@ -448,13 +451,17 @@ export class LeadPilotOrchestrator {
       // Persist verified location state
       leadPilotDb.updateJob(job.id, job);
 
-      // --- STAGE 3: Business Verification ---
+      // --- STAGE 3: Business Verification & Early Industry Relevance Validation ---
       const businessVerificationOutput = await this.executeTrackedActor(
         businessVerificationActor,
         job,
-        locationOutput.verified,
-        'Verifying business identity...'
+        {
+          businesses: locationOutput.verified,
+          requestedIndustry: criteria.industry,
+        },
+        'Verifying business identity & industry relevance...'
       );
+
 
       for (const rej of businessVerificationOutput.rejected) {
         if (rej.reason === 'MISSING_NAME') job.rejectionReasons.MISSING_NAME++;
@@ -666,101 +673,141 @@ export class LeadPilotOrchestrator {
           ? 'official_website'
           : b.source || 'google_places';
 
-        // --- Contact Enrichment & Verification Pipeline with Filter-Aware Optimization ---
-        let enrichmentOutput: ContactEnrichmentOutput | undefined;
-        try {
-          const enrichPromise = contactEnrichmentPipeline.enrichAndVerify({
-            businessId: leadId,
-            businessName: b.businessName,
-            phone: b.phone,
-            email: b.email,
-            websiteUrl: b.website,
-            source: emailSource,
-            sourceUrl: (b as any).emailSourceUrl || b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
-            contactFilter: criteria.contactFilter,
-            crawlResult: (b as any).crawlResult ? {
-              extractedEmails: (b as any).crawlResult.extractedEmails || [],
-              extractedPhones: (b as any).crawlResult.extractedPhones || [],
-              finalUrl: (b as any).crawlResult.finalUrl,
-              pages: (b as any).crawlResult.pages,
-              socialLinks: (b as any).crawlResult.socialLinks,
-              ctas: (b as any).crawlResult.ctas,
-            } : undefined,
-          });
+        // --- Section 6 & 7: Google Data First & Contact Filter Fast Path ---
+        const normPhone = normalizePhone(b.phone);
+        const normEmail = b.email && b.email.includes('@') ? b.email.trim().toLowerCase() : undefined;
+        const normContact = normalizeContactFilter(criteria.contactFilter);
 
-          // Bounded per-candidate timeout: 3500ms
-          let timeoutHandle: NodeJS.Timeout | undefined;
-          const timeoutPromise = new Promise<undefined>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve(undefined), 3500);
-          });
-          enrichmentOutput = await Promise.race([enrichPromise, timeoutPromise]).finally(() => {
-            if (timeoutHandle) clearTimeout(timeoutHandle);
-          });
-        } catch {
-          // Non-fatal: enrichment failure does not reject the lead
-        }
+        const satisfiedByExistingData =
+          (normContact === 'ALL_CONTACTS') ||
+          (normContact === 'PHONE_OR_EMAIL' && (normPhone || normEmail)) ||
+          (normContact === 'PHONE_ONLY' && normPhone) ||
+          (normContact === 'VERIFIED_PHONE' && normPhone) ||
+          (normContact === 'EMAIL_ONLY' && normEmail) ||
+          (normContact === 'EMAIL_AND_PHONE' && normPhone && normEmail);
 
         const contacts: ContactItem[] = [];
         const verifiedStatuses = new Set(['VERIFIED', 'MOBILE', 'LANDLINE']);
+        let enrichmentOutput: ContactEnrichmentOutput | undefined;
 
-        if (enrichmentOutput) {
-          for (const c of enrichmentOutput.contacts) {
-            if (c.contactType === 'PHONE') {
+        if (satisfiedByExistingData) {
+          // Google/OSM structured data satisfies requirement immediately (0.05ms)
+          if (normPhone) {
+            contacts.push({
+              value: normPhone,
+              type: 'phone',
+              source: b.source || 'google_places',
+              sourceType: b.source || 'google_places',
+              sourceUrl: (b as any).emailSourceUrl || b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
+              confidence: 'verified',
+              verified: true,
+            });
+          }
+          if (normEmail) {
+            contacts.push({
+              value: normEmail,
+              type: 'email',
+              source: emailSource,
+              sourceType: emailSource,
+              sourceUrl: (b as any).emailSourceUrl || b.website || b.sourceUrl,
+              confidence: 'verified',
+              verified: true,
+            });
+          }
+        } else {
+          // Only perform external enrichment when required contact is genuinely missing
+          try {
+            const enrichPromise = contactEnrichmentPipeline.enrichAndVerify({
+
+              businessId: leadId,
+              businessName: b.businessName,
+              phone: b.phone,
+              email: b.email,
+              websiteUrl: b.website,
+              source: emailSource,
+              sourceUrl: (b as any).emailSourceUrl || b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
+              contactFilter: criteria.contactFilter,
+              crawlResult: (b as any).crawlResult ? {
+                extractedEmails: (b as any).crawlResult.extractedEmails || [],
+                extractedPhones: (b as any).crawlResult.extractedPhones || [],
+                finalUrl: (b as any).crawlResult.finalUrl,
+                pages: (b as any).crawlResult.pages,
+                socialLinks: (b as any).crawlResult.socialLinks,
+                ctas: (b as any).crawlResult.ctas,
+              } : undefined,
+            });
+
+            // Bounded per-candidate timeout: 2500ms
+            let timeoutHandle: NodeJS.Timeout | undefined;
+            const timeoutPromise = new Promise<undefined>((resolve) => {
+              timeoutHandle = setTimeout(() => resolve(undefined), 2500);
+            });
+            enrichmentOutput = await Promise.race([enrichPromise, timeoutPromise]).finally(() => {
+              if (timeoutHandle) clearTimeout(timeoutHandle);
+            });
+          } catch {
+            // Non-fatal: enrichment failure does not reject the lead
+          }
+
+          if (enrichmentOutput) {
+            for (const c of enrichmentOutput.contacts) {
+              if (c.contactType === 'PHONE') {
+                contacts.push({
+                  value: c.normalizedValue,
+                  type: 'phone',
+                  source: c.source,
+                  sourceType: c.sourceProvider || c.source,
+                  sourceUrl: c.sourceUrl,
+                  confidence: verifiedStatuses.has(c.verificationStatus) ? 'verified' : (c.confidence >= 0.6 ? 'high' : 'medium'),
+                  verified: verifiedStatuses.has(c.verificationStatus),
+                });
+              } else if (c.contactType === 'EMAIL') {
+                contacts.push({
+                  value: c.normalizedValue,
+                  type: 'email',
+                  source: c.source,
+                  sourceType: c.sourceProvider || c.source,
+                  sourceUrl: c.sourceUrl,
+                  confidence: c.verificationStatus === 'VERIFIED' ? 'verified' : (c.confidence >= 0.6 ? 'high' : 'medium'),
+                  verified: c.verificationStatus === 'VERIFIED',
+                });
+              } else if (c.contactType === 'WHATSAPP' || c.contactType === 'CONTACT_FORM') {
+                contacts.push({
+                  value: c.normalizedValue,
+                  type: c.contactType === 'WHATSAPP' ? 'whatsapp' : 'contact_form',
+                  source: c.source,
+                  sourceType: c.sourceProvider || c.source,
+                  sourceUrl: c.sourceUrl,
+                  confidence: 'medium',
+                  verified: false,
+                });
+              }
+            }
+          } else {
+            if (normPhone) {
               contacts.push({
-                value: c.normalizedValue,
+                value: normPhone,
                 type: 'phone',
-                source: c.source,
-                sourceType: c.sourceProvider || c.source,
-                sourceUrl: c.sourceUrl,
-                confidence: verifiedStatuses.has(c.verificationStatus) ? 'verified' : (c.confidence >= 0.6 ? 'high' : 'medium'),
-                verified: verifiedStatuses.has(c.verificationStatus),
+                source: b.source || 'google_places',
+                sourceType: b.source || 'google_places',
+                confidence: 'medium',
+                verified: false,
               });
-            } else if (c.contactType === 'EMAIL') {
+            }
+            if (normEmail) {
               contacts.push({
-                value: c.normalizedValue,
+                value: normEmail,
                 type: 'email',
-                source: c.source,
-                sourceType: c.sourceProvider || c.source,
-                sourceUrl: c.sourceUrl,
-                confidence: c.verificationStatus === 'VERIFIED' ? 'verified' : (c.confidence >= 0.6 ? 'high' : 'medium'),
-                verified: c.verificationStatus === 'VERIFIED',
-              });
-            } else if (c.contactType === 'WHATSAPP' || c.contactType === 'CONTACT_FORM') {
-              contacts.push({
-                value: c.normalizedValue,
-                type: c.contactType === 'WHATSAPP' ? 'whatsapp' : 'contact_form',
-                source: c.source,
-                sourceType: c.sourceProvider || c.source,
-                sourceUrl: c.sourceUrl,
+                source: (b as any).emailSourceUrl ? 'official_website' : (b.source || 'openstreetmap'),
+                sourceType: (b as any).emailSourceUrl ? 'website' : (b.source || 'openstreetmap'),
+                sourceUrl: (b as any).emailSourceUrl || b.website,
                 confidence: 'medium',
                 verified: false,
               });
             }
           }
-        } else {
-          // Fallback: no enrichment pipeline, use raw data with UNVERIFIED status
-          if (b.phone) {
-            contacts.push({
-              value: b.phone,
-              type: 'phone',
-              source: b.source || 'google_places',
-              sourceType: b.source || 'google_places',
-              confidence: 'medium',
-              verified: false,
-            });
-          }
-          if (b.email) {
-            contacts.push({
-              value: b.email,
-              type: 'email',
-              source: (b as any).emailSourceUrl ? 'official_website' : (b.source || 'openstreetmap'),
-              sourceType: (b as any).emailSourceUrl ? 'website' : (b.source || 'openstreetmap'),
-              sourceUrl: (b as any).emailSourceUrl || b.website,
-              confidence: 'medium',
-              verified: false,
-            });
-          }
         }
+
 
         const resolvedSources = b.sources && b.sources.length > 0 ? b.sources : [b.source || 'google_places'];
         const resolvedEvidence =
@@ -844,17 +891,19 @@ export class LeadPilotOrchestrator {
           provenance: {
             phone: {
               value: b.phone,
-              source: enrichmentOutput?.contacts.find(c => c.contactType === 'PHONE')?.source || resolvedSources.join(', '),
-              verified: enrichmentOutput ? enrichmentOutput.quality.hasVerifiedPhone : false,
+              source: enrichmentOutput?.contacts.find(c => c.contactType === 'PHONE')?.source || contacts.find(c => c.type === 'phone')?.source || resolvedSources.join(', '),
+              verified: enrichmentOutput ? enrichmentOutput.quality.hasVerifiedPhone : contacts.some(c => c.type === 'phone' && c.verified),
             },
             website: { value: webClass.url, source: resolvedSources.join(', '), verified: Boolean(webClass.url) },
             email: {
               value: b.email,
               source: enrichmentOutput?.contacts.find(c => c.contactType === 'EMAIL')?.source
+                || contacts.find(c => c.type === 'email')?.source
                 || (b.email ? ((b as any).emailSourceUrl ? 'official_website' : (resolvedSources.find((s: string) => s === 'openstreetmap' || s === 'osm') || 'official_website')) : 'none'),
-              verified: enrichmentOutput ? enrichmentOutput.quality.hasVerifiedEmail : false,
+              verified: enrichmentOutput ? enrichmentOutput.quality.hasVerifiedEmail : contacts.some(c => c.type === 'email' && c.verified),
             },
           },
+
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
