@@ -61,8 +61,8 @@ export class ContactEnrichmentActor extends BaseActor<BusinessWithCrawl[], Conta
               source: b.source || 'osm',
               sourceType: b.source || 'osm',
               sourceUrl: b.sourceUrl,
-              confidence: 'verified',
-              verified: true,
+              confidence: 'medium',
+              verified: false,
             });
             activeSources.add(b.source || 'osm');
           }
@@ -75,8 +75,8 @@ export class ContactEnrichmentActor extends BaseActor<BusinessWithCrawl[], Conta
               source: b.source || 'osm',
               sourceType: b.source || 'osm',
               sourceUrl: b.sourceUrl,
-              confidence: 'verified',
-              verified: true,
+              confidence: 'medium',
+              verified: false,
             });
             activeSources.add(b.source || 'osm');
           }
@@ -92,8 +92,8 @@ export class ContactEnrichmentActor extends BaseActor<BusinessWithCrawl[], Conta
                   source: 'official_website',
                   sourceType: 'website',
                   sourceUrl: b.crawlResult.finalUrl,
-                  confidence: 'verified',
-                  verified: true,
+                  confidence: 'high',
+                  verified: false,
                 });
                 activeSources.add('official_website');
                 if (!sourceEmail) newlyEnriched = true;
@@ -109,8 +109,8 @@ export class ContactEnrichmentActor extends BaseActor<BusinessWithCrawl[], Conta
                   source: 'official_website',
                   sourceType: 'website',
                   sourceUrl: b.crawlResult.finalUrl,
-                  confidence: 'verified',
-                  verified: true,
+                  confidence: 'high',
+                  verified: false,
                 });
                 activeSources.add('official_website');
                 if (!sourcePhone) newlyEnriched = true;
@@ -142,8 +142,8 @@ export class ContactEnrichmentActor extends BaseActor<BusinessWithCrawl[], Conta
                   source: 'web_search',
                   sourceType: 'search_snippet',
                   sourceUrl: webEnrich.sourceUrl,
-                  confidence: webEnrich.confidence || 'high',
-                  verified: true,
+                  confidence: webEnrich.confidence || 'medium',
+                  verified: false,
                 });
                 activeSources.add('web_search');
                 newlyEnriched = true;
@@ -156,8 +156,8 @@ export class ContactEnrichmentActor extends BaseActor<BusinessWithCrawl[], Conta
                   source: 'web_search',
                   sourceType: 'search_snippet',
                   sourceUrl: webEnrich.sourceUrl,
-                  confidence: webEnrich.confidence || 'high',
-                  verified: true,
+                  confidence: webEnrich.confidence || 'medium',
+                  verified: false,
                 });
                 activeSources.add('web_search');
                 newlyEnriched = true;

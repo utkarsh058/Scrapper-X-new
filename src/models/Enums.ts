@@ -20,7 +20,8 @@ export type RejectionReason =
   | 'NO_WEBSITE'
   | 'WEBSITE_UNREACHABLE'
   | 'AUDIT_FAILED'
-  | 'NOT_QUALIFIED';
+  | 'NOT_QUALIFIED'
+  | 'CONTACT_FILTER_MISMATCH';
 
 export type BusinessVerificationStatus = 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';
 
@@ -44,7 +45,10 @@ export type ContactFilterType =
   | 'EMAIL_ONLY'
   | 'PHONE_ONLY'
   | 'PHONE_OR_EMAIL'
-  | 'NO_CONTACT';
+  | 'NO_CONTACT'
+  | 'VERIFIED_PHONE'
+  | 'VERIFIED_EMAIL'
+  | 'VERIFIED_PHONE_OR_EMAIL';
 
 export type WebsiteFilterType =
   | 'ANY_WEBSITE'

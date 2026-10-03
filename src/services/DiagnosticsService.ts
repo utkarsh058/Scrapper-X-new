@@ -1,4 +1,5 @@
 import { leadPilotDb } from '@/db';
+import { contactEnrichmentPipeline } from '@/lib/providers/contactEnrichmentPipeline';
 
 export class DiagnosticsService {
   public getJobDiagnostics(jobId: string) {
@@ -120,6 +121,21 @@ export class DiagnosticsService {
         completedAt: job.completedAt,
       },
       error: job.error,
+
+      // Contact Verification Provider Statuses
+      verificationProviders: (() => {
+        const statuses = contactEnrichmentPipeline.getProviderStatuses();
+        return {
+          phoneVerification: {
+            provider: statuses.phoneVerification.name,
+            status: statuses.phoneVerification.status,
+          },
+          emailVerification: {
+            provider: statuses.emailVerification.name,
+            status: statuses.emailVerification.status,
+          },
+        };
+      })(),
     };
   }
 }

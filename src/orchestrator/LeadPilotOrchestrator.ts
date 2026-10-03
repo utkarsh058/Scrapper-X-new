@@ -19,6 +19,8 @@ import {
 } from '@/lib/audit/WebsiteStatusClassifier';
 import { extractBatchEmailsForCandidates } from '@/utils/emailUtils';
 import { calculateLeadScore } from '@/lib/scoring/leadScoreCalculator';
+import { contactEnrichmentPipeline, ContactEnrichmentOutput } from '@/lib/providers/contactEnrichmentPipeline';
+import { normalizeContactFilter, evaluateContactFilter, assessContactQuality, CanonicalContact } from '@/lib/providers/contactTypes';
 
 // Blocking Fast Path Actors
 import { businessDiscoveryActor } from '@/actors/BusinessDiscoveryActor';
@@ -468,7 +470,7 @@ export class LeadPilotOrchestrator {
 
       // --- STAGE 5: Contact Qualification FIRST, then Website Filter ONLY WHEN REQUIRED ---
       const userWebsiteFilter = normalizeWebsiteFilter(criteria.websiteFilter);
-      const normContact = (criteria.contactFilter || 'All Contacts').toUpperCase().replace(/[\s_-]+/g, '_');
+      const normContact = normalizeContactFilter(criteria.contactFilter);
 
       const plan = searchPlanner.planSearch({
         industry: criteria.industry,
@@ -485,8 +487,8 @@ export class LeadPilotOrchestrator {
       const fastCandidates = deduplicationOutput.unique;
 
       // --- STAGE 4.8: Targeted Pre-Qualification Email Extraction ONLY WHEN REQUIRED ---
-      const requiresEmail = normContact === 'EMAIL_ONLY' || normContact === 'EMAIL_AND_PHONE' || normContact === 'EMAIL_+_PHONE';
-      const mayNeedEmail = normContact === 'PHONE_OR_EMAIL' || normContact === 'HAS_PHONE_OR_EMAIL';
+      const requiresEmail = normContact === 'EMAIL_ONLY' || normContact === 'EMAIL_AND_PHONE' || normContact === 'VERIFIED_EMAIL';
+      const mayNeedEmail = normContact === 'PHONE_OR_EMAIL' || normContact === 'VERIFIED_PHONE_OR_EMAIL';
 
       const candidatesNeedingEmail: typeof fastCandidates = [];
       for (const b of fastCandidates) {
@@ -494,13 +496,13 @@ export class LeadPilotOrchestrator {
         if (!b.website || b.website.trim().length === 0) continue; // No website to extract from
 
         if (requiresEmail) {
-          if (normContact === 'EMAIL_AND_PHONE' || normContact === 'EMAIL_+_PHONE') {
+          if (normContact === 'EMAIL_AND_PHONE') {
             // Must have both: only crawl if candidate already has phone
             if (b.phone && b.phone.trim().length > 0) {
               candidatesNeedingEmail.push(b);
             }
           } else {
-            // EMAIL_ONLY: crawl candidates with websites
+            // EMAIL_ONLY / VERIFIED_EMAIL: crawl candidates with websites
             candidatesNeedingEmail.push(b);
           }
         } else if (mayNeedEmail) {
@@ -531,7 +533,7 @@ export class LeadPilotOrchestrator {
         let matchesContact = true;
         let contactRejectionReason: 'NO_CONTACT' | 'NO_PHONE' | 'NO_EMAIL' | 'EMAIL_OR_PHONE_MISSING' | 'HAS_CONTACT' = 'NO_CONTACT';
 
-        if (normContact === 'ALL_CONTACTS' || normContact === 'ANY_CONTACT') {
+        if (normContact === 'ALL_CONTACTS') {
           matchesContact = true;
         } else if (normContact === 'PHONE_ONLY') {
           matchesContact = hasPhone;
@@ -539,15 +541,26 @@ export class LeadPilotOrchestrator {
         } else if (normContact === 'EMAIL_ONLY') {
           matchesContact = hasEmail;
           contactRejectionReason = 'NO_EMAIL';
-        } else if (normContact === 'EMAIL_AND_PHONE' || normContact === 'EMAIL_+_PHONE') {
+        } else if (normContact === 'EMAIL_AND_PHONE') {
           matchesContact = hasPhone && hasEmail;
           contactRejectionReason = 'EMAIL_OR_PHONE_MISSING';
-        } else if (normContact === 'PHONE_OR_EMAIL' || normContact === 'HAS_PHONE_OR_EMAIL') {
+        } else if (normContact === 'PHONE_OR_EMAIL') {
           matchesContact = hasPhone || hasEmail;
           contactRejectionReason = 'NO_CONTACT';
         } else if (normContact === 'NO_CONTACT') {
           matchesContact = !hasPhone && !hasEmail;
           contactRejectionReason = 'HAS_CONTACT';
+        } else if (normContact === 'VERIFIED_PHONE') {
+          // Pre-filter: candidate must at least have a phone to potentially have a verified phone
+          matchesContact = hasPhone;
+          contactRejectionReason = 'NO_PHONE';
+        } else if (normContact === 'VERIFIED_EMAIL') {
+          // Pre-filter: candidate must have an email or website to potentially have verified email
+          matchesContact = hasEmail || Boolean(b.website);
+          contactRejectionReason = 'NO_EMAIL';
+        } else if (normContact === 'VERIFIED_PHONE_OR_EMAIL') {
+          matchesContact = hasPhone || hasEmail || Boolean(b.website);
+          contactRejectionReason = 'NO_CONTACT';
         }
 
         if (!matchesContact) {
@@ -626,27 +639,90 @@ export class LeadPilotOrchestrator {
         // Assemble Qualified Lead Entity with Verified Provenance
         const leadId = `lead_${b.sourceId ? b.sourceId.replace(/[^a-zA-Z0-9_-]/g, '_') : Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
-        const contacts: ContactItem[] = [];
-        if (b.phone) {
-          contacts.push({
-            value: b.phone,
-            type: 'phone',
+        // --- Contact Enrichment & Verification Pipeline ---
+        let enrichmentOutput: ContactEnrichmentOutput | undefined;
+        try {
+          enrichmentOutput = await contactEnrichmentPipeline.enrichAndVerify({
+            businessId: leadId,
+            businessName: b.businessName,
+            phone: b.phone,
+            email: b.email,
+            websiteUrl: b.website,
             source: b.source || 'google_places',
-            sourceType: b.source || 'google_places',
-            confidence: 'verified',
-            verified: true,
+            sourceUrl: b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
+            crawlResult: (b as any).crawlResult ? {
+              extractedEmails: (b as any).crawlResult.extractedEmails || [],
+              extractedPhones: (b as any).crawlResult.extractedPhones || [],
+              finalUrl: (b as any).crawlResult.finalUrl,
+              pages: (b as any).crawlResult.pages,
+              socialLinks: (b as any).crawlResult.socialLinks,
+              ctas: (b as any).crawlResult.ctas,
+            } : undefined,
           });
+        } catch {
+          // Non-fatal: enrichment failure does not reject the lead
         }
-        if (b.email) {
-          contacts.push({
-            value: b.email,
-            type: 'email',
-            source: (b as any).emailSourceUrl ? 'official_website' : (b.source || 'openstreetmap'),
-            sourceType: (b as any).emailSourceUrl ? 'website' : (b.source || 'openstreetmap'),
-            sourceUrl: (b as any).emailSourceUrl || b.website,
-            confidence: 'verified',
-            verified: true,
-          });
+
+        const contacts: ContactItem[] = [];
+        const verifiedStatuses = new Set(['VERIFIED', 'MOBILE', 'LANDLINE']);
+
+        if (enrichmentOutput) {
+          for (const c of enrichmentOutput.contacts) {
+            if (c.contactType === 'PHONE') {
+              contacts.push({
+                value: c.normalizedValue,
+                type: 'phone',
+                source: c.source,
+                sourceType: c.sourceProvider || c.source,
+                sourceUrl: c.sourceUrl,
+                confidence: verifiedStatuses.has(c.verificationStatus) ? 'verified' : (c.confidence >= 0.6 ? 'high' : 'medium'),
+                verified: verifiedStatuses.has(c.verificationStatus),
+              });
+            } else if (c.contactType === 'EMAIL') {
+              contacts.push({
+                value: c.normalizedValue,
+                type: 'email',
+                source: c.source,
+                sourceType: c.sourceProvider || c.source,
+                sourceUrl: c.sourceUrl,
+                confidence: c.verificationStatus === 'VERIFIED' ? 'verified' : (c.confidence >= 0.6 ? 'high' : 'medium'),
+                verified: c.verificationStatus === 'VERIFIED',
+              });
+            } else if (c.contactType === 'WHATSAPP' || c.contactType === 'CONTACT_FORM') {
+              contacts.push({
+                value: c.normalizedValue,
+                type: c.contactType === 'WHATSAPP' ? 'whatsapp' : 'contact_form',
+                source: c.source,
+                sourceType: c.sourceProvider || c.source,
+                sourceUrl: c.sourceUrl,
+                confidence: 'medium',
+                verified: false,
+              });
+            }
+          }
+        } else {
+          // Fallback: no enrichment pipeline, use raw data with UNVERIFIED status
+          if (b.phone) {
+            contacts.push({
+              value: b.phone,
+              type: 'phone',
+              source: b.source || 'google_places',
+              sourceType: b.source || 'google_places',
+              confidence: 'medium',
+              verified: false,
+            });
+          }
+          if (b.email) {
+            contacts.push({
+              value: b.email,
+              type: 'email',
+              source: (b as any).emailSourceUrl ? 'official_website' : (b.source || 'openstreetmap'),
+              sourceType: (b as any).emailSourceUrl ? 'website' : (b.source || 'openstreetmap'),
+              sourceUrl: (b as any).emailSourceUrl || b.website,
+              confidence: 'medium',
+              verified: false,
+            });
+          }
         }
 
         const resolvedSources = b.sources && b.sources.length > 0 ? b.sources : [b.source || 'google_places'];
@@ -729,19 +805,61 @@ export class LeadPilotOrchestrator {
           googlePlaceId,
           osmId,
           provenance: {
-            phone: { value: b.phone, source: resolvedSources.join(', '), verified: Boolean(b.phone) },
+            phone: {
+              value: b.phone,
+              source: enrichmentOutput?.contacts.find(c => c.contactType === 'PHONE')?.source || resolvedSources.join(', '),
+              verified: enrichmentOutput ? enrichmentOutput.quality.hasVerifiedPhone : false,
+            },
             website: { value: webClass.url, source: resolvedSources.join(', '), verified: Boolean(webClass.url) },
             email: {
               value: b.email,
-              source: b.email
-                ? ((b as any).emailSourceUrl ? 'official_website' : (resolvedSources.find((s: string) => s === 'openstreetmap' || s === 'osm') || 'official_website'))
-                : 'none',
-              verified: Boolean(b.email),
+              source: enrichmentOutput?.contacts.find(c => c.contactType === 'EMAIL')?.source
+                || (b.email ? ((b as any).emailSourceUrl ? 'official_website' : (resolvedSources.find((s: string) => s === 'openstreetmap' || s === 'osm') || 'official_website')) : 'none'),
+              verified: enrichmentOutput ? enrichmentOutput.quality.hasVerifiedEmail : false,
             },
           },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
+
+        // Strict Post-Enrichment Contact Filter Verification
+        const contactFilterEval = evaluateContactFilter(
+          normContact,
+          enrichmentOutput?.quality || {
+            level: (contacts.some(c => c.verified) ? 'MEDIUM' : (contacts.length > 0 ? 'LOW' : 'NONE')),
+            hasPhone: contacts.some(c => c.type === 'phone'),
+            hasEmail: contacts.some(c => c.type === 'email'),
+            hasVerifiedPhone: contacts.some(c => c.type === 'phone' && c.verified),
+            hasVerifiedEmail: contacts.some(c => c.type === 'email' && c.verified),
+            hasContact: contacts.length > 0,
+            hasVerifiedContact: contacts.some(c => c.verified),
+            phoneCount: contacts.filter(c => c.type === 'phone').length,
+            emailCount: contacts.filter(c => c.type === 'email').length,
+            verifiedPhoneCount: contacts.filter(c => c.type === 'phone' && c.verified).length,
+            verifiedEmailCount: contacts.filter(c => c.type === 'email' && c.verified).length,
+            explanation: 'Inferred from contacts list',
+          }
+        );
+
+        if (!contactFilterEval.match) {
+          rejectedCandidatesList.push({
+            name: b.businessName,
+            category: b.category,
+            city: b.city,
+            state: b.state,
+            phone: b.phone,
+            email: b.email,
+            websiteUrl: b.website,
+            websiteStatus: webClass.status,
+            rejectionReason: 'CONTACT_FILTER_MISMATCH' as any,
+            rejectionDetails: `Failed strict contact filter: ${criteria.contactFilter}`,
+          });
+          job.rejectionReasons.NO_CONTACT++;
+          if (job.rejectionReasons.CONTACT_FILTER_MISMATCH !== undefined) {
+            job.rejectionReasons.CONTACT_FILTER_MISMATCH++;
+          }
+          continue;
+        }
 
         qualifiedEntities.push(entity);
       }

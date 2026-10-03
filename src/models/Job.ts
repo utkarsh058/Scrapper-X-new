@@ -17,6 +17,7 @@ export interface RejectionBreakdown {
   NOT_QUALIFIED: number;
   OTHER: number;
   WEBSITE_FILTER_MISMATCH?: number;
+  CONTACT_FILTER_MISMATCH?: number;
 }
 
 export interface PipelineBreakdown {

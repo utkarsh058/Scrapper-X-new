@@ -189,9 +189,13 @@ class LeadsDatabase {
             await prisma.contact.create({
               data: {
                 businessId: dbBusiness.id,
+                contactType: contactPhone ? 'PHONE' : 'EMAIL',
                 phone: contactPhone,
                 email: contactEmail,
-                verificationStatus: 'VERIFIED',
+                normalizedValue: contactPhone || contactEmail,
+                rawValue: contactPhone || contactEmail,
+                source: lead.source || 'google_places',
+                verificationStatus: lead.contact?.verified ? 'VERIFIED' : 'UNVERIFIED',
               },
             });
           }

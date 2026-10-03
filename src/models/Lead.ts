@@ -183,7 +183,7 @@ export function leadEntityToFrontend(lead: LeadEntity): FrontendLead {
       email: lead.email,
       hasPhone: Boolean(lead.phone),
       hasEmail: Boolean(lead.email),
-      verified: true,
+      verified: lead.contacts?.some((c) => c.verified === true) ?? false,
       linkedin: lead.socialLinks?.linkedin,
     },
     website: {

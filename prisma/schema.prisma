@@ -66,17 +66,59 @@ model Contact {
   businessId         String
   name               String?
   role               String?
+  contactType        String               @default("PHONE")       // PHONE | EMAIL | WHATSAPP | CONTACT_FORM | SOCIAL | OTHER
   type               String               @default("GENERIC_BUSINESS")
+  rawValue           String?
+  normalizedValue    String?
   email              String?
   phone              String?
   linkedin           String?
-  verificationStatus String               @default("UNVERIFIED")
+  domain             String?
+  countryCode        String?
+  lineType           String?              // MOBILE | LANDLINE | VOIP | UNKNOWN
+  source             String?              // google_places | osm | official_website | web_search
   sourceUrl          String?
+  sourceProvider     String?              // Provider name that discovered this contact
+  confidence         Float                @default(0.0)
+  verificationStatus String               @default("UNVERIFIED")  // UNKNOWN | UNVERIFIED | VERIFIED | INVALID | RISKY | BOUNCED | DISPOSABLE | ROLE_BASED | UNAVAILABLE
+  verifiedAt         DateTime?
+  firstDiscoveredAt  DateTime             @default(now())
+  lastCheckedAt      DateTime?
+  isPrimary          Boolean              @default(false)
+  isPublic           Boolean              @default(true)
+  isRoleBased        Boolean              @default(false)
+  isDisposable       Boolean              @default(false)
+  evidence           String?              // JSON: extraction evidence snippet
+  metadata           String?              // JSON: additional provider-specific data
   createdAt          DateTime             @default(now())
   business           Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
   verifications      VerificationResult[]
+  contactVerifications ContactVerification[]
 
   @@index([businessId])
+  @@index([contactType, verificationStatus])
+  @@index([normalizedValue])
+}
+
+model ContactVerification {
+  id              String   @id @default(cuid())
+  contactId       String
+  provider        String                // dns_mx | libphonenumber | twilio_lookup | zerobounce | hunter | internal
+  status          String                // VERIFIED | INVALID | RISKY | UNKNOWN | DISPOSABLE | ROLE_BASED | BOUNCED | UNAVAILABLE | FORMAT_VALID | DOMAIN_VALID | MX_VALID | DELIVERABILITY_VERIFIED
+  level           String   @default("SYNTAX")  // SYNTAX | DOMAIN | MX | DELIVERABILITY | CARRIER
+  hasValidSyntax  Boolean  @default(false)
+  hasMxRecords    Boolean?
+  isDisposable    Boolean  @default(false)
+  isRoleBased     Boolean  @default(false)
+  lineType        String?               // MOBILE | LANDLINE | VOIP | UNKNOWN
+  carrier         String?
+  confidence      Float    @default(0.0)
+  details         String?               // JSON: provider-specific details
+  verifiedAt      DateTime @default(now())
+  contact         Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([provider])
 }
 
 model Website {
