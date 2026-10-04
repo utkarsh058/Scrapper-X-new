@@ -30,6 +30,7 @@ yarn-error.log*
 *.db-wal
 *.db-shm
 .leadpilot/
-node_modules
-.env*
+.env
+.env*.local
+!.env.example
 scratch/
