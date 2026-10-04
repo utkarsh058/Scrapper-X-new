@@ -188,7 +188,7 @@ export class LeadPilotOrchestrator {
    * Bounded by global search deadline (default LEAD_SEARCH_DEADLINE_MS = 8000ms, Section 13).
    */
   public async executeJob(jobId: string): Promise<Job> {
-    const deadlineMs = Number(process.env.LEAD_SEARCH_DEADLINE_MS) || 25000;
+    const deadlineMs = Number(process.env.LEAD_SEARCH_DEADLINE_MS) || 45000;
     let timeoutHandle: NodeJS.Timeout | undefined;
 
     const deadlinePromise = new Promise<{ deadlineReached: true }>((resolve) => {
@@ -213,29 +213,27 @@ export class LeadPilotOrchestrator {
           job.completedAt = new Date().toISOString();
 
           // Ensure pipeline breakdown is truthful and strictly non-negative
-          if (!job.pipelineBreakdown) {
-            const locVer = job.locationVerifiedCount || 0;
-            const outLoc = job.rejectionReasons?.OUTSIDE_LOCATION || 0;
-            const unkLoc = job.rejectionReasons?.UNKNOWN_LOCATION || 0;
-            job.pipelineBreakdown = {
-              rawDiscoveredCount: job.discovered || 0,
-              normalizedCount: job.normalizedCount || job.discovered || 0,
-              locationCheckedCount: locVer + outLoc + unkLoc,
-              locationVerifiedCount: locVer,
-              inCityBoundsCount: locVer,
-              outsideLocationCount: outLoc,
-              unknownLocationCount: unkLoc,
-              deduplicatedCount: job.deduplicated || 0,
-              phoneCount: job.phoneCount || 0,
-              emailCount: job.emailCount || 0,
-              phoneOrEmailCount: job.phoneOrEmailCount || 0,
-              websiteAvailableCount: job.websiteVerifiedCount || 0,
-              websiteUnavailableCount: job.noWebsiteCount || 0,
-              verifiedNoWebsiteCount: job.noWebsiteCount || 0,
-              websiteUnreachableCount: 0,
-              finalQualifiedCount: (job.leads || []).length,
-            };
-          }
+          const locVer = job.locationVerifiedCount || 0;
+          const outLoc = job.rejectionReasons?.OUTSIDE_LOCATION || 0;
+          const unkLoc = job.rejectionReasons?.UNKNOWN_LOCATION || 0;
+          job.pipelineBreakdown = {
+            rawDiscoveredCount: job.discovered || 0,
+            normalizedCount: job.normalizedCount || job.discovered || 0,
+            locationCheckedCount: locVer + outLoc + unkLoc,
+            locationVerifiedCount: locVer,
+            inCityBoundsCount: locVer,
+            outsideLocationCount: outLoc,
+            unknownLocationCount: unkLoc,
+            deduplicatedCount: job.deduplicated || 0,
+            phoneCount: job.phoneCount || 0,
+            emailCount: job.emailCount || 0,
+            phoneOrEmailCount: job.phoneOrEmailCount || 0,
+            websiteAvailableCount: job.websiteVerifiedCount || 0,
+            websiteUnavailableCount: job.noWebsiteCount || 0,
+            verifiedNoWebsiteCount: job.noWebsiteCount || 0,
+            websiteUnreachableCount: 0,
+            finalQualifiedCount: (job.leads || []).length,
+          };
 
           leadPilotDb.updateJob(job.id, job);
           return job;
@@ -698,6 +696,7 @@ export class LeadPilotOrchestrator {
             source: b.source || 'google_places',
             sourceUrl: b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
             skipLiveWebCrawl: true,  // Fast path: avoid per-lead website crawl latency
+            skipPersistence: true,   // Fast path: avoid remote DB roundtrips on fast-path search
             crawlResult: (b as any).crawlResult ? {
               extractedEmails: (b as any).crawlResult.extractedEmails || [],
               extractedPhones: (b as any).crawlResult.extractedPhones || [],
@@ -915,6 +914,10 @@ export class LeadPilotOrchestrator {
         }
 
         qualifiedEntities.push(entity);
+        job.leads = [...qualifiedEntities];
+        job.qualified = qualifiedEntities.length;
+        job.completed = qualifiedEntities.length;
+        leadPilotDb.updateJob(job.id, job);
 
         // Break early if we have collected enough qualified entities for the requested quota
         if (qualifiedEntities.length >= Math.max(job.requestedLeads * 2, 25)) {

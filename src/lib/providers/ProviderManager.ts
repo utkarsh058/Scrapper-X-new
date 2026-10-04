@@ -80,8 +80,8 @@ export class ProviderManager {
   ): Promise<ProviderManagerResult> {
     const startTime = Date.now();
     const requestedLimit = Math.max(Number(params.limit) || 20, 5);
-    // Over-collect candidates: targetPool = max(requestedLimit * 3, 60)
-    const targetPool = Math.max(requestedLimit * 3, 60);
+    // Over-collect candidates: targetPool capped to 120 to prevent excessive over-fetching
+    const targetPool = Math.min(Math.max(requestedLimit * 2, 60), 120);
 
     const health: SystemProvidersHealth = providerHealthService.checkHealth();
 
@@ -197,9 +197,9 @@ export class ProviderManager {
     // If Google Places has already discovered sufficient candidates, bypass OSM to preserve latency.
     const isOsmEnabled = health.osm.configured && health.osm.enabled;
     const googleFailed = ['FAILED', 'DISABLED', 'NOT_CONFIGURED', 'PROVIDER_NOT_CONFIGURED', 'PROVIDER_FAILURE', 'AUTH_FAILED', 'REQUEST_FAILED', 'RATE_LIMITED', 'NO_RESULTS'].includes(result.providers.googlePlaces.status);
-    // OSM is used when: (1) Google failed entirely, OR (2) the candidate pool is smaller than targetPool
-    // This ensures we supplement with OSM when Google returns some but not enough candidates.
-    const needOsm = googleFailed || result.businesses.length < targetPool;
+    // OSM is used when: (1) Google failed entirely, OR (2) Google returned very few candidates (< Math.min(requestedLimit, 20))
+    // This ensures we do not trigger slow/unreliable Overpass calls when Google already returned ample candidates.
+    const needOsm = googleFailed || result.businesses.length < Math.min(requestedLimit, 20);
 
     if (isOsmEnabled && needOsm) {
       onProgress?.('Executing OpenStreetMap Overpass as Secondary / Fallback discovery source...');

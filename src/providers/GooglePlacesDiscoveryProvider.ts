@@ -169,7 +169,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
     }
 
     const fieldMask = this.getFieldMask();
-    const targetPool = Math.max((params.limit || 20) * 3, 60);
+    const targetPool = Math.min(Math.max((params.limit || 20) * 2, 60), 100);
     const timeouts = getTimeoutConfig();
     const effectiveTimeout = Math.max(timeouts.googlePlacesFastMs || 8000, 5000);
 
@@ -404,7 +404,8 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
       } while (nextPageToken && businesses.length < targetPool && pageCount < maxPages);
       
       // If candidate pool is still too small, safely iterate over query variations
-      if (businesses.length < targetPool) {
+      // Only iterate variations if primary query yielded fewer than 40 results to preserve latency
+      if (businesses.length < targetPool && businesses.length < 40) {
         let variationIndex = 1; // start from the second query
         while (businesses.length < targetPool && variationIndex < queries.length) {
           const currentQuery = queries[variationIndex];

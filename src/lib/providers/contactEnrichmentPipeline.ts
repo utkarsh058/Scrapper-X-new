@@ -63,6 +63,7 @@ export interface ContactEnrichmentInput {
     jsonLdPhones?: string[];
   };
   skipLiveWebCrawl?: boolean;
+  skipPersistence?: boolean;
 }
 
 export interface ContactEnrichmentOutput {
@@ -311,7 +312,7 @@ export class ContactEnrichmentPipeline {
 
     // ─── PERSIST CONTACTS ───────────────────────────
     let contactsPersistedCount = 0;
-    if (input.businessId && rawContacts.length > 0) {
+    if (!input.skipPersistence && input.businessId && rawContacts.length > 0) {
       try {
         const persistResult = await persistContacts({
           businessId: input.businessId,
@@ -380,7 +381,7 @@ export class ContactEnrichmentPipeline {
     }
 
     // ─── PERSIST VERIFICATION RESULTS ───────────────
-    if (input.businessId) {
+    if (!input.skipPersistence && input.businessId) {
       try {
         const dbContacts = await getBusinessContacts(input.businessId);
         

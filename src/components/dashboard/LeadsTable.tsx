@@ -459,7 +459,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                 : osmStatus === 'REQUEST_FAILED' || osmStatus === 'FAILED'
                 ? 'Failed'
                 : osmStatus === 'SUPPLEMENTAL' || osmStatus === 'NOT_NEEDED'
-                ? (osmCount > 0 ? `Active (${osmCount})` : 'Supplemental')
+                ? (osmCount > 0 ? `Active (${osmCount})` : 'Standby')
                 : osmStatus}
             </strong></span>
             <span>•</span>
@@ -756,7 +756,9 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                   0 Qualified Leads Delivered
                 </h3>
                 <p className="text-[13px] text-[#64748B] max-w-lg mt-1 leading-relaxed">
-                  The pipeline discovered {pipelineBreakdown?.rawDiscoveredCount || pipelineStats?.rawOsmCount || 0} candidate businesses, but none satisfied the required filter criteria. Complete rejection breakdown is detailed below.
+                  {(pipelineBreakdown?.rawDiscoveredCount || pipelineStats?.rawOsmCount || 0) === 0
+                    ? 'No candidate businesses were discovered matching this query and location. Try searching for a broader industry category or expanding the geographic area.'
+                    : `The pipeline discovered ${pipelineBreakdown?.rawDiscoveredCount || pipelineStats?.rawOsmCount || 0} candidate businesses, but none satisfied the required filter criteria. Complete rejection breakdown is detailed below.`}
                 </p>
               </div>
             )}
