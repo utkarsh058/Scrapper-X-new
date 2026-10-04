@@ -1,7 +1,6 @@
-import { AccountCreatedDatePrecision } from '@/types/canonical';
-
 export type CommercialMetricType = 'GMV' | 'SALES' | 'REVENUE' | 'ARR' | 'FUNDING' | 'VALUATION' | 'TRANSACTION_VOLUME';
 export type MilestoneSourceType = 'PRIMARY' | 'SECONDARY' | 'INTERVIEW' | 'FUNDING_REPORT' | 'SEARCH_SNIPPET';
+export type CommercialDatePrecision = 'DAY' | 'MONTH' | 'QUARTER' | 'YEAR';
 
 export interface ParsedMilestone {
   metricType: CommercialMetricType;
@@ -9,7 +8,7 @@ export interface ParsedMilestone {
   currency: string | null;
   formattedAmount: string;
   date: Date | null;
-  datePrecision: AccountCreatedDatePrecision | null;
+  datePrecision: CommercialDatePrecision | null;
   period: string | null;
   sourceUrl: string;
   sourceType: MilestoneSourceType;

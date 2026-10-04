@@ -62,16 +62,13 @@ describe('Real Social Account Creation Date Live Acceptance Test', () => {
       const identity: CanonicalBusinessIdentity = {
         name: item.businessName,
         category: 'Restaurant',
-        categories: ['Restaurant'],
         address: `${item.businessName}, ${item.city}, Uttar Pradesh, India`,
         city: item.city,
         state: 'Uttar Pradesh',
         country: 'India',
         postalCode: '201310',
         phone: null,
-        phoneE164: null,
         website: null,
-        confidenceScore: 0.95,
       };
 
       const mockSocial: SocialProfile = {

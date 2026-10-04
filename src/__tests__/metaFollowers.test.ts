@@ -29,14 +29,15 @@ describe('Instagram + Facebook Follower Counts Only (Real Data)', () => {
 
   const mockIdentity: CanonicalBusinessIdentity = {
     name: 'Trees & Treats Restaurant',
+    category: 'Restaurant',
     city: 'Greater Noida',
     state: 'Uttar Pradesh',
     country: 'India',
     website: 'https://treesandtreats.com',
     phone: '+91 99999 12345',
     address: 'Near Knowledge Park III, Greater Noida',
-    lat: 28.4744,
-    lon: 77.504,
+    latitude: 28.4744,
+    longitude: 77.504,
   };
 
   // Test 1: Instagram exact public follower count

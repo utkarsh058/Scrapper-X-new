@@ -81,6 +81,7 @@ export class WebsiteDiscoveryActor extends BaseActor<VerifiedBusiness[], Busines
           // Outside search budget and no website provided in sources
           return {
             ...b,
+            websiteUrl: b.websiteUrl ?? b.website ?? undefined,
             officialWebsite: false,
             websiteStatus: 'NOT_FOUND' as const,
             websiteEvidence: 'No website recorded in source discovery',

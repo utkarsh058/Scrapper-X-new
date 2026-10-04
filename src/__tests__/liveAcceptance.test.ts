@@ -37,7 +37,7 @@ describe('Live Acceptance Test (Section 43: Restaurant in Greater Noida)', () =>
     const businesses = completedSession.businesses;
 
     // Compile Acceptance Report
-    const googleProviderStatus = completedSession.providerStatuses.googlePlaces;
+    const googleProviderStatus = completedSession.providerStatuses?.googlePlaces;
     const googleDiscovered = businesses.filter((b) => b.sources.some((s) => s.provider.toLowerCase() === 'google_places')).length;
     const googlePersisted = completedSession.persistenceStatus === 'PERSISTED' ? googleDiscovered : 0;
     const totalDiscovered = completedSession.progress.discovered;
@@ -66,7 +66,7 @@ describe('Live Acceptance Test (Section 43: Restaurant in Greater Noida)', () =>
         else if (s.platform === 'youtube') youtubeCount++;
         else if (s.platform === 'linkedin') linkedinCount++;
         else if (s.platform === 'tiktok') tiktokCount++;
-        else if (s.platform === 'x' || s.platform === 'twitter') xCount++;
+        else if ((s.platform as string) === 'x' || s.platform === 'twitter') xCount++;
         else otherSocialCount++;
       }
     }

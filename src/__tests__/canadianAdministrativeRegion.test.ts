@@ -148,9 +148,9 @@ describe('Canadian Administrative Region Validation & Discovery Intelligence', (
       expect(job.criteria.state).toBe('Ontario');
 
       // Execute synchronous pipeline run
-      const completedJob = await leadPilotOrchestrator.executeJob(job.id, 25000);
+      const completedJob = await leadPilotOrchestrator.executeJob(job.id);
       expect(completedJob.status).not.toBe('FAILED');
-      expect(completedJob.rejectionReasons?.INVALID_LOCATION || 0).toBe(0);
+      expect(completedJob.rejectionReasons?.OUTSIDE_LOCATION || 0).toBe(0);
       console.log(`[Job Success] Discovered: ${completedJob.discovered} Canadian businesses in Ontario.`);
     }, 30000);
   });

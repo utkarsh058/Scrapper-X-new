@@ -3,10 +3,11 @@ import { commercialMilestoneService } from '@/services/commercial/CommercialMile
 
 export async function GET(
   request: Request,
-  { params }: { params: { businessId: string } }
+  { params }: { params: Promise<{ businessId: string }> }
 ) {
   try {
-    const milestones = await commercialMilestoneService.getMilestonesForBusiness(params.businessId);
+    const { businessId } = await params;
+    const milestones = await commercialMilestoneService.getMilestonesForBusiness(businessId);
 
     return NextResponse.json({
       success: true,

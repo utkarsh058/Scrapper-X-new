@@ -355,60 +355,85 @@ describe('LeadPilot Multi-Country Expansion & Multi-Tenancy Test Suite', () => {
       const candidates: CanonicalBusiness[] = [
         {
           id: 'biz_1',
-          name: 'Perfect 5 Star Diner',
-          googlePlaceId: 'p1',
-          identity: { canonicalName: 'Perfect 5 Star Diner', name: 'Perfect 5 Star Diner', countryCode: 'US' },
+          source: 'GOOGLE_PLACES',
+          identity: { name: 'Perfect 5 Star Diner', category: 'Restaurant', countryCode: 'US' },
           google: {
             placeId: 'p1',
             rating: 5.0,
             reviewCount: 1200,
             businessStatus: 'OPERATIONAL',
-            url: null,
-            fetchedAt: new Date().toISOString(),
+            mapsUrl: null,
+            profileCreatedAt: null,
+            profileCreatedAtType: 'NOT_AVAILABLE',
+            firstSeenAt: new Date(),
+            lastCheckedAt: new Date(),
           },
+          sources: [{ provider: 'google_places', sourceId: 'p1', collectedAt: new Date() }],
+          social: [],
+          ranking: {},
+          eligibility: { included: true, excludedReason: null },
           evidence: [],
-          eligibility: { included: true, reasons: [], fiveStarExcluded: false },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         {
           id: 'biz_2',
-          name: 'High Rated Bistro',
-          googlePlaceId: 'p2',
-          identity: { canonicalName: 'High Rated Bistro', name: 'High Rated Bistro', countryCode: 'US' },
+          source: 'GOOGLE_PLACES',
+          identity: { name: 'High Rated Bistro', category: 'Restaurant', countryCode: 'US' },
           google: {
             placeId: 'p2',
             rating: 4.9,
             reviewCount: 850,
             businessStatus: 'OPERATIONAL',
-            url: null,
-            fetchedAt: new Date().toISOString(),
+            mapsUrl: null,
+            profileCreatedAt: null,
+            profileCreatedAtType: 'NOT_AVAILABLE',
+            firstSeenAt: new Date(),
+            lastCheckedAt: new Date(),
           },
+          sources: [{ provider: 'google_places', sourceId: 'p2', collectedAt: new Date() }],
+          social: [],
+          ranking: {},
+          eligibility: { included: true, excludedReason: null },
           evidence: [],
-          eligibility: { included: true, reasons: [], fiveStarExcluded: false },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         {
           id: 'biz_3',
-          name: 'Classic Grill',
-          googlePlaceId: 'p3',
-          identity: { canonicalName: 'Classic Grill', name: 'Classic Grill', countryCode: 'US' },
+          source: 'GOOGLE_PLACES',
+          identity: { name: 'Classic Grill', category: 'Restaurant', countryCode: 'US' },
           google: {
             placeId: 'p3',
             rating: 4.8,
             reviewCount: 3400,
             businessStatus: 'OPERATIONAL',
-            url: null,
-            fetchedAt: new Date().toISOString(),
+            mapsUrl: null,
+            profileCreatedAt: null,
+            profileCreatedAtType: 'NOT_AVAILABLE',
+            firstSeenAt: new Date(),
+            lastCheckedAt: new Date(),
           },
+          sources: [{ provider: 'google_places', sourceId: 'p3', collectedAt: new Date() }],
+          social: [],
+          ranking: {},
+          eligibility: { included: true, excludedReason: null },
           evidence: [],
-          eligibility: { included: true, reasons: [], fiveStarExcluded: false },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         {
           id: 'biz_4',
-          name: 'New Unrated Cafe',
-          googlePlaceId: 'p4',
-          identity: { canonicalName: 'New Unrated Cafe', name: 'New Unrated Cafe', countryCode: 'CA' },
-          google: null,
+          source: 'GOOGLE_PLACES',
+          identity: { name: 'New Unrated Cafe', category: 'Restaurant', countryCode: 'CA' },
+          google: undefined,
+          sources: [{ provider: 'google_places', sourceId: 'p4', collectedAt: new Date() }],
+          social: [],
+          ranking: {},
+          eligibility: { included: true, excludedReason: null },
           evidence: [],
-          eligibility: { included: true, reasons: [], fiveStarExcluded: false },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       ];
 
@@ -432,55 +457,76 @@ describe('LeadPilot Multi-Country Expansion & Multi-Tenancy Test Suite', () => {
       const candidates: CanonicalBusiness[] = [
         {
           id: 'a',
-          name: 'Bistro A',
-          googlePlaceId: 'pa',
-          identity: { canonicalName: 'Bistro A', name: 'Bistro A' },
+          source: 'GOOGLE_PLACES',
+          identity: { name: 'Bistro A', category: 'Restaurant' },
           google: {
             placeId: 'pa',
             rating: 4.9,
             reviewCount: 2800,
             businessStatus: 'OPERATIONAL',
-            url: null,
-            fetchedAt: new Date().toISOString(),
+            mapsUrl: null,
+            profileCreatedAt: null,
+            profileCreatedAtType: 'NOT_AVAILABLE',
+            firstSeenAt: new Date(),
+            lastCheckedAt: new Date(),
           },
+          sources: [],
+          social: [],
+          ranking: {},
+          eligibility: { included: true, excludedReason: null },
           evidence: [],
-          eligibility: { included: true, reasons: [], fiveStarExcluded: false },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         {
           id: 'b',
-          name: 'Restaurant B',
-          googlePlaceId: 'pb',
-          identity: { canonicalName: 'Restaurant B', name: 'Restaurant B' },
+          source: 'GOOGLE_PLACES',
+          identity: { name: 'Restaurant B', category: 'Restaurant' },
           google: {
             placeId: 'pb',
             rating: 4.8,
             reviewCount: 4500,
             businessStatus: 'OPERATIONAL',
-            url: null,
-            fetchedAt: new Date().toISOString(),
+            mapsUrl: null,
+            profileCreatedAt: null,
+            profileCreatedAtType: 'NOT_AVAILABLE',
+            firstSeenAt: new Date(),
+            lastCheckedAt: new Date(),
           },
+          sources: [],
+          social: [],
+          ranking: {},
+          eligibility: { included: true, excludedReason: null },
           evidence: [],
-          eligibility: { included: true, reasons: [], fiveStarExcluded: false },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         {
           id: 'c',
-          name: 'Cafe C',
-          googlePlaceId: 'pc',
-          identity: { canonicalName: 'Cafe C', name: 'Cafe C' },
+          source: 'GOOGLE_PLACES',
+          identity: { name: 'Cafe C', category: 'Restaurant' },
           google: {
             placeId: 'pc',
             rating: 4.7,
             reviewCount: 900,
             businessStatus: 'OPERATIONAL',
-            url: null,
-            fetchedAt: new Date().toISOString(),
+            mapsUrl: null,
+            profileCreatedAt: null,
+            profileCreatedAtType: 'NOT_AVAILABLE',
+            firstSeenAt: new Date(),
+            lastCheckedAt: new Date(),
           },
+          sources: [],
+          social: [],
+          ranking: {},
+          eligibility: { included: true, excludedReason: null },
           evidence: [],
-          eligibility: { included: true, reasons: [], fiveStarExcluded: false },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       ];
 
-      const ranked = businessRankingService.rank(candidates, { sort: 'REVIEW_COUNT_DESC' });
+      const ranked = businessRankingService.rank(candidates, { sort: { field: 'reviewCount', direction: 'desc' } });
       expect(ranked[0].id).toBe('b'); // 4,500 reviews ranks first
       expect(ranked[1].id).toBe('a'); // 2,800 reviews ranks second
       expect(ranked[2].id).toBe('c'); // 900 reviews ranks third
@@ -541,7 +587,7 @@ describe('LeadPilot Multi-Country Expansion & Multi-Tenancy Test Suite', () => {
       }
 
       console.log(`[USA Live Acceptance] Discovered ${res.candidates.length} real businesses in Los Angeles, CA.`);
-      console.log(`[USA Sample Lead] ${firstCandidate.name} (${firstCandidate.address}) - Rating: ${firstCandidate.rating} (${firstCandidate.userRatingCount} reviews)`);
+      console.log(`[USA Sample Lead] ${firstCandidate.name} (${firstCandidate.address}) - Rating: ${firstCandidate.rating} (${firstCandidate.reviewCount} reviews)`);
     }, 25000);
   });
 
@@ -569,7 +615,7 @@ describe('LeadPilot Multi-Country Expansion & Multi-Tenancy Test Suite', () => {
       expect(firstCandidate.address).toBeDefined();
 
       console.log(`[Canada Live Acceptance] Discovered ${res.candidates.length} real businesses in Toronto, ON.`);
-      console.log(`[Canada Sample Lead] ${firstCandidate.name} (${firstCandidate.address}) - Rating: ${firstCandidate.rating} (${firstCandidate.userRatingCount} reviews)`);
+      console.log(`[Canada Sample Lead] ${firstCandidate.name} (${firstCandidate.address}) - Rating: ${firstCandidate.rating} (${firstCandidate.reviewCount} reviews)`);
     }, 25000);
   });
 });

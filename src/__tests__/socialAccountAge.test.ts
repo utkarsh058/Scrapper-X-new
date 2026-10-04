@@ -9,16 +9,13 @@ describe('Real Social Account Creation Date Enrichment V2 Test Suite', () => {
   const baseIdentity: CanonicalBusinessIdentity = {
     name: 'Haveli Of Grill',
     category: 'Restaurant',
-    categories: ['Restaurant', 'North Indian Restaurant'],
     address: 'CC - 242, Ansal Golf Link -1, Greater Noida, Uttar Pradesh 201315',
     city: 'Greater Noida',
     state: 'Uttar Pradesh',
     country: 'India',
     postalCode: '201315',
     phone: '092660 41042',
-    phoneE164: '+919266041042',
     website: 'https://haveliofgrill.com',
-    confidenceScore: 0.95,
   };
 
   const baseProfile = (platform: 'facebook' | 'instagram' | 'linkedin', url: string): SocialProfile => ({
