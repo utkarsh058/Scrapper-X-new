@@ -18,6 +18,9 @@ model Business {
   city             String?
   state            String?
   country          String               @default("India")
+  countryCode      String?              @default("IN")
+  regionCode       String?
+  timezone         String?
   postcode         String?
   latitude         Float?
   longitude        Float?
@@ -29,6 +32,8 @@ model Business {
   businessStatus   String               @default("OPERATIONAL")
   opportunityScore Int                  @default(0)
   status           String               @default("New")
+  tenantId         String?
+  tenant           Tenant?              @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
   sources          BusinessSource[]
@@ -41,10 +46,18 @@ model Business {
   verifications    VerificationResult[]
   websites         Website[]
   audits           WebsiteAudit[]
+  googleProfile    GoogleBusinessProfile?
+  socialProfiles   SocialProfile[]
+  reviewSummary    ReviewSummary?
+  reviews          Review[]
+  sourceEvidences  SourceEvidence[]
+  commercialMilestones CommercialMilestone[]
 
   @@index([city, state])
   @@index([industry])
   @@index([opportunityScore])
+  @@index([tenantId])
+  @@index([countryCode])
 }
 
 model BusinessSource {
@@ -351,4 +364,279 @@ model SearchResultHistory {
   @@index([fingerprintKey])
   @@index([placeId])
   @@index([deliveredAt])
+}
+
+model GoogleBusinessProfile {
+  id                         String         @id @default(cuid())
+  businessId                 String         @unique
+  placeId                    String         @unique
+  rating                     Float?
+  reviewCount                Int?
+  googleMapsUrl              String?
+  businessStatus             String?        @default("OPERATIONAL")
+  priceLevel                 Int?
+  profileCreatedAt           DateTime?
+  profileCreatedAtType       String         @default("NOT_AVAILABLE")
+  firstSeenAt                DateTime?
+  lastCheckedAt              DateTime       @default(now())
+  rawPayload                 String?
+  business                   Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  reviews                    Review[]
+  reviewSummary              ReviewSummary?
+
+  @@index([placeId])
+  @@index([rating])
+  @@index([reviewCount])
+}
+
+model ReviewSummary {
+  id                          String                 @id @default(cuid())
+  businessId                  String                 @unique
+  googleProfileId             String?                @unique
+  rating                      Float?
+  reviewCount                 Int?
+  reviewLevelDataAvailable    Boolean                @default(false)
+  earliestAvailableReviewDate DateTime?
+  source                      String                 @default("google_places")
+  capturedAt                  DateTime               @default(now())
+  business                    Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  googleProfile               GoogleBusinessProfile? @relation(fields: [googleProfileId], references: [id], onDelete: Cascade)
+  reviews                     Review[]
+
+  @@index([businessId])
+}
+
+model Review {
+  id              String                 @id @default(cuid())
+  businessId      String
+  googleProfileId String?
+  reviewSummaryId String?
+  authorName      String?
+  rating          Int
+  text            String?
+  publishTime     DateTime?
+  source          String                 @default("google_places")
+  capturedAt      DateTime               @default(now())
+  business        Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  googleProfile   GoogleBusinessProfile? @relation(fields: [googleProfileId], references: [id])
+  reviewSummary   ReviewSummary?         @relation(fields: [reviewSummaryId], references: [id])
+
+  @@index([businessId])
+  @@index([rating])
+}
+
+model SocialProfile {
+  id                   String                  @id @default(cuid())
+  businessId           String
+  platform             String                  // instagram, facebook, youtube, linkedin, tiktok, twitter, pinterest, threads, whatsapp_business, other
+  profileUrl           String?
+  username             String?
+  displayName          String?
+  description          String?
+  followers            Int?
+  displayFollowerCount String?
+  isRounded            Boolean?
+  following            Int?
+  posts                Int?
+  subscribers          Int?
+  videos               Int?
+  likes                Int?
+  verified             Boolean?
+  createdAt            DateTime?
+  createdAtType        String                  @default("NOT_AVAILABLE") // OFFICIAL_API | NOT_AVAILABLE
+  firstSeenAt          DateTime?
+  lastActivityAt       DateTime?
+  source               String                  // website_header, website_footer, website_jsonld, official_api
+  confidence           Float                   @default(1.0)
+  createdAtSource      String?
+  metricStatus         String?                 @default("NOT_AVAILABLE") // AVAILABLE | NOT_AVAILABLE | NOT_CONFIGURED | UNAUTHORIZED | RATE_LIMITED | API_ERROR | PROFILE_NOT_FOUND
+  metricSource         String?
+  metricSourceType     String?                 @default("NONE")          // OFFICIAL_API | PUBLIC_WEB | WEBSITE_METADATA | NONE
+  followersFetchedAt   DateTime?
+  verificationStatus   String?                 @default("UNVERIFIED")    // VERIFIED | UNVERIFIED | REJECTED
+
+  // Creation Date Enrichment V2
+  accountCreatedAt             DateTime?
+  accountCreatedDatePrecision  String?                 // DAY | MONTH | YEAR
+  accountCreatedConfidence     String?                 // HIGH | MEDIUM | LOW
+  accountCreatedStatus         String?                 @default("NOT_AVAILABLE") // VERIFIED_EXACT | VERIFIED_MONTH | VERIFIED_YEAR | FIRST_OBSERVED_ONLY | NOT_AVAILABLE | CONFLICT
+  accountCreatedSourceType     String?                 // PUBLIC_PROFILE | SEARCH_ENGINE | PUBLIC_ARCHIVE | NONE
+  accountCreatedSourceUrl      String?
+  accountCreatedEvidenceText   String?
+  accountCreatedFetchedAt      DateTime?
+  firstObservedAt              DateTime?
+  firstObservedSourceType      String?
+  firstObservedSourceUrl       String?
+  firstObservedEvidenceText    String?
+  earliestPublicPostAt         DateTime?
+  earliestPublicPostSourceUrl  String?
+
+  lastCheckedAt        DateTime                @default(now())
+  business             Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  snapshots            SocialProfileSnapshot[]
+  sourceEvidences      SourceEvidence[]
+
+  @@index([businessId])
+  @@index([platform, username])
+  @@index([platform, profileUrl])
+}
+
+model SocialProfileSnapshot {
+  id                          String        @id @default(cuid())
+  profileId                   String
+  followers                   Int?
+  displayFollowerCount        String?
+  isRounded                   Boolean?
+  following                   Int?
+  posts                       Int?
+  subscribers                 Int?
+  videos                      Int?
+  likes                       Int?
+  isVerified                  Boolean?
+  metricStatus                String?       @default("NOT_AVAILABLE")
+  metricSourceType            String?       @default("NONE")
+  accountCreatedAt            DateTime?
+  accountCreatedAtType        String?       @default("NOT_AVAILABLE")
+
+  // Creation Date Enrichment V2
+  accountCreatedDatePrecision String?
+  accountCreatedConfidence    String?
+  accountCreatedStatus        String?       @default("NOT_AVAILABLE")
+  accountCreatedSourceType    String?
+  accountCreatedSourceUrl     String?
+  accountCreatedEvidenceText  String?
+  accountCreatedFetchedAt     DateTime?
+  firstObservedAt             DateTime?
+  firstObservedSourceType     String?
+  firstObservedSourceUrl      String?
+  firstObservedEvidenceText   String?
+  earliestPublicPostAt        DateTime?
+  earliestPublicPostSourceUrl String?
+
+  capturedAt                  DateTime      @default(now())
+  source                      String
+  profile                     SocialProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([capturedAt])
+}
+
+model SourceEvidence {
+  id              String         @id @default(cuid())
+  entityType      String         // business, contact, social_profile, review_summary
+  entityId        String
+  field           String
+  value           String
+  source          String
+  capturedAt      DateTime       @default(now())
+  confidence      String         @default("HIGH") // HIGH, MEDIUM, LOW
+  metadata        String?
+  businessId      String?
+  socialProfileId String?
+  business        Business?      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  socialProfile   SocialProfile? @relation(fields: [socialProfileId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@index([businessId])
+}
+
+model Tenant {
+  id                     String            @id @default(cuid())
+  name                   String
+  slug                   String            @unique
+  allowedCountries       String[]          @default(["IN", "US", "CA"])
+  maxBusinessesPerSearch Int               @default(500)
+  monthlyBusinessLimit   Int               @default(10000)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  users                  User[]
+  memberships            Membership[]
+  searches               SearchJobRecord[]
+  businesses             Business[]
+}
+
+model User {
+  id          String            @id @default(cuid())
+  email       String            @unique
+  name        String?
+  role        String            @default("MEMBER") // OWNER | ADMIN | MEMBER | VIEWER
+  tenantId    String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+  searches    SearchJobRecord[]
+
+  @@index([tenantId])
+  @@index([email])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      String   @default("MEMBER") // OWNER | ADMIN | MEMBER | VIEWER
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model SearchJobRecord {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  userId             String?
+  searchId           String    @unique
+  query              String
+  countryCode        String    @default("IN")
+  regionCode         String?
+  regionName         String?
+  cityName           String?
+  postalCode         String?
+  status             String    @default("CREATED") // CREATED | DISCOVERING | READY | FAILED
+  requestedCount     Int       @default(50)
+  discoveredCount    Int       @default(0)
+  rawDiscoveredCount Int       @default(0)
+  duplicatesCount    Int       @default(0)
+  deduplicatedCount  Int       @default(0)
+  excludedCount      Int       @default(0)
+  eligibleCount      Int       @default(0)
+  persistedCount     Int       @default(0)
+  failedCount        Int       @default(0)
+  error              String?
+  startedAt          DateTime  @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user               User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([searchId])
+  @@index([countryCode])
+}
+
+model CommercialMilestone {
+  id              String   @id @default(cuid())
+  businessId      String
+  metricType      String   // GMV, SALES, REVENUE, ARR, FUNDING, VALUATION, TRANSACTION_VOLUME
+  amount          Float?
+  currency        String?
+  formattedAmount String?
+  date            DateTime?
+  datePrecision   String?  // DAY, MONTH, QUARTER, YEAR
+  period          String?  // FY23, Q1 2024
+  sourceUrl       String?
+  sourceType      String?  // PRIMARY, SECONDARY, INTERVIEW, FUNDING_REPORT, SEARCH_SNIPPET
+  evidenceText    String?
+  confidence      String   @default("HIGH") // HIGH, MEDIUM, LOW
+  status          String   @default("NOT_AVAILABLE") // VERIFIED, NOT_AVAILABLE, CONFLICT
+  capturedAt      DateTime @default(now())
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([metricType])
 }

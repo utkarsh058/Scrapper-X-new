@@ -3,6 +3,7 @@ export interface SearchDiscoveryParams {
   state: string;
   city?: string;
   country?: string;
+  countryCode?: string;
   keywords?: string[];
   limit: number;
   bbox?: [number, number, number, number] | any;
@@ -24,15 +25,24 @@ export interface RawDiscoveredBusiness {
   postcode?: string; // Backwards compatible alias
   latitude?: number;
   longitude?: number;
-  phone?: string;
-  email?: string;
-  website?: string;
+  phone?: string | null;
+  phoneNational?: string | null;
+  phoneInternational?: string | null;
+  email?: string | null;
+  website?: string | null;
+  websiteUrl?: string | null;
+  googleMapsUrl?: string | null;
+  rating?: number | null;
+  reviewCount?: number | null;
+  businessStatus?: string | null;
   socialLinks?: any;
   openingHours?: string;
   osmType?: 'node' | 'way' | 'relation';
   osmId?: number;
   categoryTag?: string;
   types?: string[];
+  primaryType?: string | null;
+  primaryTypeDisplayName?: string | null;
   rawTags: Record<string, any>;
   sourceEvidence?: {
     source: string;

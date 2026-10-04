@@ -131,13 +131,15 @@ export default function DashboardPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          country: 'India',
+          country: criteria.country || 'India',
+          countryCode: criteria.countryCode,
           state: criteria.state,
           city: criteria.city,
           industry: criteria.industry,
           contactFilter: criteria.contact,
           websiteFilter: criteria.website,
           limit: criteria.limit,
+          excludePerfectRating: criteria.excludePerfectRating !== false,
           sync: true,
         }),
       });

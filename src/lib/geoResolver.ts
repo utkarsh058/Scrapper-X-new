@@ -54,7 +54,31 @@ export const STATE_BOUNDS: Record<string, BoundingBox> = {
   'Tripura': { south: 22.93, west: 91.15, north: 24.53, east: 92.35, centerLat: 23.9408, centerLon: 91.9882 },
   'Andaman and Nicobar Islands': { south: 6.75, west: 92.20, north: 13.70, east: 94.30, centerLat: 11.7401, centerLon: 92.6586 },
   'Dadra and Nagar Haveli and Daman and Diu': { south: 20.00, west: 70.80, north: 20.80, east: 73.20, centerLat: 20.4283, centerLon: 72.8397 },
-  'Lakshadweep': { south: 8.25, west: 71.70, north: 12.40, east: 74.00, centerLat: 10.5667, centerLon: 72.6417 }
+  'Lakshadweep': { south: 8.25, west: 71.70, north: 12.40, east: 74.00, centerLat: 10.5667, centerLon: 72.6417 },
+  // Canadian Provinces & Territories
+  'Ontario': { south: 41.68, west: -95.16, north: 56.86, east: -74.34, centerLat: 51.2538, centerLon: -85.3232 },
+  'Quebec': { south: 44.99, west: -79.76, north: 62.58, east: -57.10, centerLat: 52.9399, centerLon: -73.5491 },
+  'British Columbia': { south: 48.30, west: -139.06, north: 60.00, east: -114.03, centerLat: 53.7267, centerLon: -127.6476 },
+  'Alberta': { south: 48.99, west: -120.00, north: 60.00, east: -110.00, centerLat: 53.9333, centerLon: -116.5765 },
+  'Manitoba': { south: 49.00, west: -102.03, north: 60.00, east: -88.98, centerLat: 53.7609, centerLon: -98.8139 },
+  'Saskatchewan': { south: 49.00, west: -110.00, north: 60.00, east: -101.36, centerLat: 52.9399, centerLon: -106.4509 },
+  'Nova Scotia': { south: 43.38, west: -66.42, north: 47.03, east: -59.74, centerLat: 44.6820, centerLon: -63.7443 },
+  'New Brunswick': { south: 44.60, west: -69.06, north: 48.07, east: -63.77, centerLat: 46.5653, centerLon: -66.4619 },
+  'Newfoundland and Labrador': { south: 46.61, west: -67.80, north: 60.37, east: -52.62, centerLat: 53.1355, centerLon: -57.6604 },
+  'Prince Edward Island': { south: 45.95, west: -64.42, north: 47.05, east: -61.97, centerLat: 46.5107, centerLon: -63.4168 },
+  'Northwest Territories': { south: 60.00, west: -136.44, north: 78.77, east: -101.98, centerLat: 64.8255, centerLon: -124.8457 },
+  'Nunavut': { south: 51.19, west: -120.69, north: 83.11, east: -61.02, centerLat: 70.2998, centerLon: -83.1076 },
+  'Yukon': { south: 60.00, west: -141.00, north: 69.65, east: -123.81, centerLat: 64.2823, centerLon: -135.0000 }
+};
+
+// Generic pan-Canada bounding box
+export const CANADA_PAN_BOUNDS: BoundingBox = {
+  south: 41.67,
+  west: -141.00,
+  north: 83.11,
+  east: -52.62,
+  centerLat: 56.1304,
+  centerLon: -106.3468,
 };
 
 // Generic pan-India bounding box covering all territories
@@ -199,16 +223,107 @@ export const MAJOR_CITIES_BOUNDS: Record<string, BoundingBox> = {
   'Raipur': { south: 21.20, west: 81.58, north: 21.29, east: 81.69, centerLat: 21.2514, centerLon: 81.6296 },
   'Dehradun': { south: 30.27, west: 77.98, north: 30.38, east: 78.10, centerLat: 30.3165, centerLon: 78.0322 },
   'Kochi': { south: 9.90, west: 76.24, north: 10.02, east: 76.35, centerLat: 9.9312, centerLon: 76.2673 },
-  'Thiruvananthapuram': { south: 8.44, west: 76.88, north: 8.56, east: 77.00, centerLat: 8.5241, centerLon: 76.9366 }
+  'Thiruvananthapuram': { south: 8.44, west: 76.88, north: 8.56, east: 77.00, centerLat: 8.5241, centerLon: 76.9366 },
+
+  // Canadian Major Cities
+  'Toronto': { south: 43.58, west: -79.64, north: 43.86, east: -79.12, centerLat: 43.6532, centerLon: -79.3832 },
+  'Ottawa': { south: 45.10, west: -76.35, north: 45.54, east: -75.25, centerLat: 45.4215, centerLon: -75.6972 },
+  'Mississauga': { south: 43.48, west: -79.79, north: 43.74, east: -79.54, centerLat: 43.5890, centerLon: -79.6441 },
+  'Brampton': { south: 43.62, west: -79.85, north: 43.80, east: -79.64, centerLat: 43.7315, centerLon: -79.7624 },
+  'Hamilton': { south: 43.15, west: -80.10, north: 43.35, east: -79.70, centerLat: 43.2557, centerLon: -79.8711 },
+  'London': { south: 42.88, west: -81.38, north: 43.08, east: -81.12, centerLat: 42.9849, centerLon: -81.2453 },
+  'Markham': { south: 43.80, west: -79.43, north: 43.95, east: -79.20, centerLat: 43.8561, centerLon: -79.3370 },
+  'Vaughan': { south: 43.75, west: -79.65, north: 43.90, east: -79.45, centerLat: 43.8563, centerLon: -79.5085 },
+  'Kitchener': { south: 43.38, west: -80.55, north: 43.50, east: -80.40, centerLat: 43.4516, centerLon: -80.4925 },
+  'Windsor': { south: 42.24, west: -83.10, north: 42.36, east: -82.90, centerLat: 42.3149, centerLon: -83.0364 },
+  'Montreal': { south: 45.40, west: -73.98, north: 45.71, east: -73.47, centerLat: 45.5017, centerLon: -73.5673 },
+  'Vancouver': { south: 49.19, west: -123.23, north: 49.32, east: -123.02, centerLat: 49.2827, centerLon: -123.1207 },
+  'Calgary': { south: 50.84, west: -114.32, north: 51.22, east: -113.86, centerLat: 51.0447, centerLon: -114.0719 },
+  'Edmonton': { south: 53.39, west: -113.72, north: 53.66, east: -113.27, centerLat: 53.5461, centerLon: -113.4938 }
 };
 
 /**
- * Resolves a state and optional city to a search bounding box in India.
+ * Resolves location across Canada, US, and India to bounding boxes.
+ */
+export async function resolveLocation(
+  countryInput?: string,
+  stateName?: string,
+  cityName?: string
+): Promise<BoundingBox> {
+  const normCountry = (countryInput || 'IN').trim().toLowerCase();
+  const isCanada = normCountry === 'ca' || normCountry === 'can' || normCountry === 'canada';
+  const cleanState = (stateName || '').trim();
+  const cleanCity = (cityName || '').trim();
+
+  if (isCanada) {
+    if (cleanCity && cleanCity.toLowerCase() !== 'all cities in this state' && cleanCity.toLowerCase() !== 'all cities in this province' && cleanCity !== '') {
+      const cacheKey = `ca:${cleanCity.toLowerCase()}, ${cleanState.toLowerCase()}`;
+      if (geoCache.has(cacheKey)) {
+        return geoCache.get(cacheKey)!;
+      }
+
+      // Check curated Canadian cities
+      for (const [key, bbox] of Object.entries(MAJOR_CITIES_BOUNDS)) {
+        if (key.toLowerCase() === cleanCity.toLowerCase()) {
+          geoCache.set(cacheKey, bbox);
+          return bbox;
+        }
+      }
+
+      // Dynamic resolution via Nominatim for Canada
+      try {
+        const nominatimUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${cleanCity}, ${cleanState}, Canada`)}&countrycodes=ca&format=json&limit=1`;
+        const res = await fetch(nominatimUrl, {
+          headers: { 'User-Agent': 'LeadPilot-Engine/2.1 (contact: team@leadpilot.app)' },
+          signal: AbortSignal.timeout(3500)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.length > 0) {
+            const item = data[0];
+            const resolved: BoundingBox = {
+              south: parseFloat(item.boundingbox[0]),
+              north: parseFloat(item.boundingbox[1]),
+              west: parseFloat(item.boundingbox[2]),
+              east: parseFloat(item.boundingbox[3]),
+              centerLat: parseFloat(item.lat),
+              centerLon: parseFloat(item.lon)
+            };
+            geoCache.set(cacheKey, resolved);
+            return resolved;
+          }
+        }
+      } catch {}
+    }
+
+    // Check province bounds (e.g. Ontario)
+    for (const [key, bbox] of Object.entries(STATE_BOUNDS)) {
+      if (key.toLowerCase() === cleanState.toLowerCase()) {
+        return bbox;
+      }
+    }
+
+    return CANADA_PAN_BOUNDS;
+  }
+
+  // Fallback to resolveIndiaLocation
+  return resolveIndiaLocation(cleanState, cleanCity, countryInput);
+}
+
+/**
+ * Resolves a state and optional city to a search bounding box in India or specified country.
  */
 export async function resolveIndiaLocation(
   stateName: string,
-  cityName?: string
+  cityName?: string,
+  countryInput?: string
 ): Promise<BoundingBox> {
+  const normCountry = (countryInput || '').trim().toLowerCase();
+  const isCanada = normCountry === 'ca' || normCountry === 'can' || normCountry === 'canada' || stateName?.toLowerCase() === 'ontario';
+  if (isCanada) {
+    return resolveLocation('CA', stateName, cityName);
+  }
+
   const cleanState = stateName.trim();
   const cleanCity = cityName?.trim();
 

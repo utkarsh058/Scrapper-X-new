@@ -394,3 +394,5 @@ export function validateStateAndCity(
   return { valid: true, matchedState: stateObj.name };
 }
 
+export { validateAdministrativeRegion } from '@/lib/location/RegionRegistry';
+

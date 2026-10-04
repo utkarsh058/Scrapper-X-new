@@ -206,13 +206,15 @@ export interface RejectedCandidateItem {
 }
 
 export interface SearchRequestPayload {
-  country: 'India';
+  country: 'India' | 'United States' | 'Canada' | 'IN' | 'US' | 'CA' | string;
+  countryCode?: 'IN' | 'US' | 'CA' | string;
   state: string;
   city?: string;
   industry: string;
   contactFilter?: ContactFilter;
   websiteFilter?: WebsiteFilter;
   limit: number;
+  excludePerfectRating?: boolean;
 }
 
 export type LeadStatus = 'New' | 'In Review' | 'Contacted' | 'Qualified' | 'Unresponsive';
@@ -250,6 +252,13 @@ export interface Lead {
   websiteIssues?: string[];
   websiteAudit?: StructuredWebsiteAudit;
   sourceUrl?: string;
+  rating?: number | null;
+  reviewCount?: number | null;
+  googleRating?: number | null;
+  googleReviewCount?: number | null;
+  googleMapsUrl?: string | null;
+  social?: any[];
+  socialLinks?: Record<string, string>;
   discoveredAt?: string;
   createdAt?: string;
   updatedAt?: string;

@@ -19,7 +19,7 @@ export const StatCards: React.FC<StatCardsProps> = ({
     {
       id: 'all',
       title: 'Businesses Found',
-      value: (metrics.businessesFound ?? 1248).toLocaleString(),
+      value: (metrics.businessesFound ?? 0).toLocaleString(),
       icon: Building2,
       iconColor: 'text-slate-600',
       iconBg: 'bg-slate-100',
@@ -27,7 +27,7 @@ export const StatCards: React.FC<StatCardsProps> = ({
     {
       id: 'No Website',
       title: 'No Website',
-      value: (metrics.noWebsite ?? 186).toLocaleString(),
+      value: (metrics.noWebsite ?? 0).toLocaleString(),
       icon: GlobeX,
       iconColor: 'text-rose-600',
       iconBg: 'bg-rose-50',
@@ -35,7 +35,7 @@ export const StatCards: React.FC<StatCardsProps> = ({
     {
       id: 'Needs Improvement',
       title: 'Needs Improvement',
-      value: (metrics.poorWebsite ?? 324).toLocaleString(),
+      value: (metrics.poorWebsite ?? 0).toLocaleString(),
       icon: AlertCircle,
       iconColor: 'text-amber-600',
       iconBg: 'bg-amber-50',
@@ -43,7 +43,7 @@ export const StatCards: React.FC<StatCardsProps> = ({
     {
       id: 'Email + Phone',
       title: 'Email + Phone',
-      value: (metrics.qualifiedLeads ?? 472).toLocaleString(),
+      value: (metrics.qualifiedLeads ?? 0).toLocaleString(),
       icon: CheckCircle2,
       iconColor: 'text-teal-600',
       iconBg: 'bg-teal-50',

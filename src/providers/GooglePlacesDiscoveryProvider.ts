@@ -22,7 +22,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
   private getFieldMask(): string {
     return (
       process.env.GOOGLE_PLACES_FIELD_MASK ||
-      'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri,nextPageToken'
+      'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.rating,places.userRatingCount,places.businessStatus,nextPageToken'
     );
   }
 
@@ -54,10 +54,11 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
   public async discoverBusinesses(params: SearchDiscoveryParams): Promise<DiscoveryResult> {
     const startTime = Date.now();
     const resolvedArea = params.city ? `${params.city}, ${params.state}` : params.state;
-    const country = 'India'; // LeadPilot is strictly India-only
+    const country = params.country || (params.countryCode === 'CA' ? 'Canada' : params.countryCode === 'US' ? 'United States' : (params.state?.toLowerCase() === 'ontario' ? 'Canada' : 'India'));
     const queries = [
       `${params.industry} in ${resolvedArea}, ${country}`,
-      `${params.industry} ${resolvedArea}`,
+      `${params.industry} ${resolvedArea}, ${country}`,
+      `${params.industry} in ${resolvedArea}`,
       `${params.industry} near ${resolvedArea}`
     ];
 
@@ -192,10 +193,14 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
               const url = 'https://places.googleapis.com/v1/places:searchText';
               const fetchStart = Date.now();
 
+              const effectiveRegionCode = (params.countryCode || (country === 'Canada' ? 'CA' : country === 'United States' ? 'US' : 'IN')).toLowerCase();
               const reqPayload: any = {
                 textQuery: queries[0],
                 pageSize: 20,
               };
+              if (effectiveRegionCode) {
+                reqPayload.regionCode = effectiveRegionCode;
+              }
               if (currentPageToken) {
                 reqPayload.pageToken = currentPageToken;
               }
@@ -303,13 +308,20 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
 
           const name = p.displayName?.text || 'Unnamed Business';
           const address = p.formattedAddress || '';
-          const phone = p.nationalPhoneNumber || p.internationalPhoneNumber;
-          const website = p.websiteUri;
+          const nationalPhone = p.nationalPhoneNumber || null;
+          const internationalPhone = p.internationalPhoneNumber || null;
+          const phone = nationalPhone || internationalPhone || null;
+          const website = p.websiteUri || null;
           const types = p.types || [];
-          const category = p.primaryType || (types.length > 0 ? types[0] : params.industry);
-          const lat = p.location?.latitude;
-          const lon = p.location?.longitude;
-          const mapsUrl = p.googleMapsUri || `https://www.google.com/maps/place/?q=place_id:${placeId}`;
+          const primaryType = p.primaryType || null;
+          const primaryTypeDisplayName = p.primaryTypeDisplayName?.text || null;
+          const category = primaryTypeDisplayName || primaryType || (types.length > 0 ? types[0] : params.industry);
+          const lat = typeof p.location?.latitude === 'number' ? p.location.latitude : undefined;
+          const lon = typeof p.location?.longitude === 'number' ? p.location.longitude : undefined;
+          const mapsUrl = p.googleMapsUri || (placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : null);
+          const rating = typeof p.rating === 'number' ? p.rating : null;
+          const reviewCount = typeof p.userRatingCount === 'number' ? p.userRatingCount : null;
+          const businessStatus = p.businessStatus || 'OPERATIONAL';
 
           // Cache place in PlaceCache
           googleDiscoveryCache.setPlace({
@@ -328,7 +340,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
             source: 'google_places',
             sources: ['google_places'],
             sourceId: placeId,
-            sourceUrl: mapsUrl,
+            sourceUrl: mapsUrl || undefined,
             confidence: 'high',
             name,
             businessName: name,
@@ -339,11 +351,22 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
             latitude: lat,
             longitude: lon,
             phone,
+            phoneNational: nationalPhone,
+            phoneInternational: internationalPhone,
             website,
+            websiteUrl: website,
+            googleMapsUrl: mapsUrl,
+            rating,
+            reviewCount,
+            businessStatus,
             types,
+            primaryType,
+            primaryTypeDisplayName,
             rawTags: {
               googlePlaceId: placeId,
-              primaryType: p.primaryType,
+              placeId,
+              primaryType,
+              primaryTypeDisplayName,
               types,
               displayName: p.displayName?.text,
               formattedAddress: p.formattedAddress,
@@ -352,16 +375,21 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
               nationalPhoneNumber: p.nationalPhoneNumber,
               internationalPhoneNumber: p.internationalPhoneNumber,
               websiteUri: p.websiteUri,
+              rating: p.rating,
+              userRatingCount: p.userRatingCount,
+              businessStatus: p.businessStatus,
             },
             sourceEvidence: [
               {
                 source: 'google_places',
                 sourceId: placeId,
-                sourceUrl: mapsUrl,
+                sourceUrl: mapsUrl || undefined,
                 rawTags: {
                   googlePlaceId: placeId,
+                  placeId,
                   types,
-                  primaryType: p.primaryType,
+                  primaryType,
+                  primaryTypeDisplayName,
                 },
               },
             ],
@@ -444,13 +472,20 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
 
               const name = p.displayName?.text || 'Unnamed Business';
               const address = p.formattedAddress || '';
-              const phone = p.nationalPhoneNumber || p.internationalPhoneNumber;
-              const website = p.websiteUri;
+              const nationalPhone = p.nationalPhoneNumber || null;
+              const internationalPhone = p.internationalPhoneNumber || null;
+              const phone = nationalPhone || internationalPhone || null;
+              const website = p.websiteUri || null;
               const types = p.types || [];
-              const category = p.primaryType || (types.length > 0 ? types[0] : params.industry);
-              const lat = p.location?.latitude;
-              const lon = p.location?.longitude;
-              const mapsUrl = p.googleMapsUri || `https://www.google.com/maps/place/?q=place_id:${placeId}`;
+              const primaryType = p.primaryType || null;
+              const primaryTypeDisplayName = p.primaryTypeDisplayName?.text || null;
+              const category = primaryTypeDisplayName || primaryType || (types.length > 0 ? types[0] : params.industry);
+              const lat = typeof p.location?.latitude === 'number' ? p.location.latitude : undefined;
+              const lon = typeof p.location?.longitude === 'number' ? p.location.longitude : undefined;
+              const mapsUrl = p.googleMapsUri || (placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : null);
+              const rating = typeof p.rating === 'number' ? p.rating : null;
+              const reviewCount = typeof p.userRatingCount === 'number' ? p.userRatingCount : null;
+              const businessStatus = p.businessStatus || 'OPERATIONAL';
 
               // Cache place in PlaceCache
               googleDiscoveryCache.setPlace({
@@ -462,19 +497,52 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
                 source: 'google_places',
                 sources: ['google_places'],
                 sourceId: placeId,
-                sourceUrl: mapsUrl,
+                sourceUrl: mapsUrl || undefined,
                 confidence: 'high',
                 name, businessName: name, category, address,
                 city: params.city || params.state, state: params.state,
-                latitude: lat, longitude: lon, phone, website, types,
+                latitude: lat, longitude: lon,
+                phone,
+                phoneNational: nationalPhone,
+                phoneInternational: internationalPhone,
+                website,
+                websiteUrl: website,
+                googleMapsUrl: mapsUrl,
+                rating,
+                reviewCount,
+                businessStatus,
+                types,
+                primaryType,
+                primaryTypeDisplayName,
                 rawTags: {
-                  googlePlaceId: placeId, primaryType: p.primaryType, types,
-                  displayName: p.displayName?.text, formattedAddress: p.formattedAddress,
-                  googleMapsUri: p.googleMapsUri, location: p.location,
-                  nationalPhoneNumber: p.nationalPhoneNumber, internationalPhoneNumber: p.internationalPhoneNumber,
+                  googlePlaceId: placeId,
+                  placeId,
+                  primaryType,
+                  primaryTypeDisplayName,
+                  types,
+                  displayName: p.displayName?.text,
+                  formattedAddress: p.formattedAddress,
+                  googleMapsUri: p.googleMapsUri,
+                  location: p.location,
+                  nationalPhoneNumber: p.nationalPhoneNumber,
+                  internationalPhoneNumber: p.internationalPhoneNumber,
                   websiteUri: p.websiteUri,
+                  rating: p.rating,
+                  userRatingCount: p.userRatingCount,
+                  businessStatus: p.businessStatus,
                 },
-                sourceEvidence: [{ source: 'google_places', sourceId: placeId, sourceUrl: mapsUrl, rawTags: { googlePlaceId: placeId, types, primaryType: p.primaryType } }],
+                sourceEvidence: [{
+                  source: 'google_places',
+                  sourceId: placeId,
+                  sourceUrl: mapsUrl || undefined,
+                  rawTags: {
+                    googlePlaceId: placeId,
+                    placeId,
+                    types,
+                    primaryType,
+                    primaryTypeDisplayName,
+                  },
+                }],
               });
             }
 

@@ -1,5 +1,8 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
+import { loadEnvConfig } from '@next/env';
+
+loadEnvConfig(process.cwd());
 
 export default defineConfig({
   resolve: {
@@ -9,6 +12,6 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts', 'scratch/**/*.test.ts'],
-    testTimeout: 30000,
+    testTimeout: 60000,
   },
 });

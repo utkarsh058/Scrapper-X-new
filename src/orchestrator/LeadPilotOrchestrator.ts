@@ -4,8 +4,8 @@ import { LeadEntity, ContactItem, leadEntityToFrontend } from '@/models/Lead';
 import { leadPilotDb } from '@/db';
 import { leadsDb } from '@/lib/leadsDb';
 import { logger } from '@/utils/logger';
-import { validateStateAndCity } from '@/data/indiaLocations';
-import { resolveIndiaLocation } from '@/lib/geoResolver';
+import { validateStateAndCity, validateAdministrativeRegion } from '@/data/indiaLocations';
+import { resolveIndiaLocation, resolveLocation } from '@/lib/geoResolver';
 import { searchPlanner } from '@/lib/search/SearchPlanner';
 import { performanceTracker, SearchTimestamps } from '@/lib/metrics/PerformanceTracker';
 import { backgroundEnrichmentQueue } from '@/lib/queue/BackgroundEnrichmentQueue';
@@ -273,14 +273,32 @@ export class LeadPilotOrchestrator {
       const criteria = job.criteria;
 
       // 0. Location Pre-validation
-      const validation = validateStateAndCity(criteria.state, criteria.city);
-      if (!validation.valid) {
-        throw new Error(validation.error || 'Invalid State or City specification.');
-      }
+      const countryInput = (criteria as any).countryCode || criteria.country || 'India';
+      const isCanada = countryInput === 'CA' || String(countryInput).toLowerCase() === 'canada' || criteria.state?.toLowerCase() === 'ontario';
+      const isUSA = countryInput === 'US' || String(countryInput).toLowerCase().includes('united states');
 
-      const verifiedState = validation.matchedState || criteria.state;
-      const verifiedCity = validation.matchedCity || criteria.city;
-      const bbox = await resolveIndiaLocation(verifiedState, verifiedCity);
+      let verifiedState = criteria.state;
+      let verifiedCity = criteria.city;
+      let bbox: any;
+
+      if (isCanada || isUSA) {
+        const countryCode = isCanada ? 'CA' : 'US';
+        const adminValidation = validateAdministrativeRegion(countryCode, criteria.state, criteria.city);
+        if (!adminValidation.valid) {
+          throw new Error(adminValidation.error || 'Invalid Province or City specification.');
+        }
+        verifiedState = adminValidation.name || criteria.state;
+        verifiedCity = adminValidation.matchedCity || criteria.city;
+        bbox = await resolveLocation(countryCode, verifiedState, verifiedCity);
+      } else {
+        const validation = validateStateAndCity(criteria.state, criteria.city);
+        if (!validation.valid) {
+          throw new Error(validation.error || 'Invalid State or City specification.');
+        }
+        verifiedState = validation.matchedState || criteria.state;
+        verifiedCity = validation.matchedCity || criteria.city;
+        bbox = await resolveIndiaLocation(verifiedState, verifiedCity);
+      }
 
       // Check persistent storage for previously discovered businesses (Section 12 & 26)
       const existingLeads = leadPilotDb.findLeadsByLocationAndIndustry({
@@ -318,7 +336,8 @@ export class LeadPilotOrchestrator {
           industry: criteria.industry,
           state: verifiedState,
           city: verifiedCity,
-          country: criteria.country || 'India',
+          country: isCanada ? 'Canada' : isUSA ? 'United States' : (criteria.country || 'India'),
+          countryCode: isCanada ? 'CA' : isUSA ? 'US' : ((criteria as any).countryCode || 'IN'),
           limit: targetDiscoveryPool,
           bbox,
         },
@@ -420,6 +439,8 @@ export class LeadPilotOrchestrator {
           businesses: mergeOutput.merged,
           state: verifiedState,
           city: verifiedCity,
+          country: isCanada ? 'Canada' : isUSA ? 'United States' : (criteria.country || 'India'),
+          countryCode: isCanada ? 'CA' : isUSA ? 'US' : ((criteria as any).countryCode || 'IN'),
         },
         'Verifying municipal boundaries...'
       );
@@ -466,6 +487,29 @@ export class LeadPilotOrchestrator {
       job.deduplicatedCount = deduplicationOutput.unique.length;
       job.rejectionReasons.DUPLICATE += deduplicationOutput.duplicatesCount;
       job.pipelineBreakdown.deduplicatedCount = deduplicationOutput.unique.length;
+
+      // --- STAGE 4.9: Pre-filter pipeline counts from the full candidate pool ---
+      // These are computed from ALL deduplicated candidates BEFORE any contact/website filter is applied.
+      // This is what the dashboard shows as "Phone Available", "Email Available", "Website Available".
+      const preCandidates = deduplicationOutput.unique;
+      const prePhoneCount = preCandidates.filter((b) => Boolean(b.phone && b.phone.trim().length > 0)).length;
+      const preEmailCount = preCandidates.filter((b) => Boolean(b.email && b.email.trim().length > 0)).length;
+      const prePhoneOrEmailCount = preCandidates.filter((b) => Boolean((b.phone && b.phone.trim().length > 0) || (b.email && b.email.trim().length > 0))).length;
+      const preWebsiteCount = preCandidates.filter((b) => Boolean(b.website && b.website.trim().length > 0)).length;
+      const preNoWebsiteCount = preCandidates.length - preWebsiteCount;
+
+      // Persist pre-filter breakdown so they are visible even if the pipeline times out after this point
+      job.pipelineBreakdown.phoneCount = prePhoneCount;
+      job.pipelineBreakdown.emailCount = preEmailCount;
+      job.pipelineBreakdown.phoneOrEmailCount = prePhoneOrEmailCount;
+      job.pipelineBreakdown.websiteAvailableCount = preWebsiteCount;
+      job.pipelineBreakdown.websiteUnavailableCount = preNoWebsiteCount;
+      job.pipelineBreakdown.verifiedNoWebsiteCount = preNoWebsiteCount;
+      job.phoneCount = prePhoneCount;
+      job.emailCount = preEmailCount;
+      job.phoneOrEmailCount = prePhoneOrEmailCount;
+      job.websiteVerifiedCount = preWebsiteCount;
+      job.noWebsiteCount = preNoWebsiteCount;
       leadPilotDb.updateJob(job.id, job);
 
       // --- STAGE 5: Contact Qualification FIRST, then Website Filter ONLY WHEN REQUIRED ---
@@ -521,7 +565,7 @@ export class LeadPilotOrchestrator {
           'Extracting Verified Contact Emails',
           `Checking official websites for ${poolLimit} candidates (Filter: ${criteria.contactFilter})...`
         );
-        await extractBatchEmailsForCandidates(candidatesNeedingEmail, poolLimit);
+        await extractBatchEmailsForCandidates(candidatesNeedingEmail as any[], poolLimit);
       }
 
       const contactPassedCandidates: typeof fastCandidates = [];
@@ -610,7 +654,7 @@ export class LeadPilotOrchestrator {
       for (const b of contactPassedCandidates) {
         // Evaluate Website Reachability & Filter
         const reachCheck = b.website ? reachabilityMap.get(b.website) : undefined;
-        const webClass = classifyCandidateWebsite(b.website, userWebsiteFilter, reachCheck);
+        const webClass = classifyCandidateWebsite(b.website ?? undefined, userWebsiteFilter, reachCheck);
 
         if (!webClass.matchesFilter) {
           rejectedCandidatesList.push({
@@ -640,16 +684,20 @@ export class LeadPilotOrchestrator {
         const leadId = `lead_${b.sourceId ? b.sourceId.replace(/[^a-zA-Z0-9_-]/g, '_') : Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
         // --- Contact Enrichment & Verification Pipeline ---
+        // Fast path: skipLiveWebCrawl=true avoids sequential per-lead HTTP website crawls that
+        // consume the 25s deadline before any leads are finalized. Background enrichment handles
+        // full website crawl asynchronously after the fast-path response is delivered.
         let enrichmentOutput: ContactEnrichmentOutput | undefined;
         try {
           enrichmentOutput = await contactEnrichmentPipeline.enrichAndVerify({
             businessId: leadId,
             businessName: b.businessName,
-            phone: b.phone,
-            email: b.email,
-            websiteUrl: b.website,
+            phone: b.phone ?? undefined,
+            email: b.email ?? undefined,
+            websiteUrl: b.website ?? undefined,
             source: b.source || 'google_places',
             sourceUrl: b.sourceUrl || (b.source === 'google_places' ? `https://www.google.com/maps/place/?q=place_id:${b.sourceId}` : undefined),
+            skipLiveWebCrawl: true,  // Fast path: avoid per-lead website crawl latency
             crawlResult: (b as any).crawlResult ? {
               extractedEmails: (b as any).crawlResult.extractedEmails || [],
               extractedPhones: (b as any).crawlResult.extractedPhones || [],
@@ -762,8 +810,8 @@ export class LeadPilotOrchestrator {
           city: b.city || verifiedCity,
           state: b.state || verifiedState,
           country: (b as any).country || criteria.country || 'India',
-          phone: b.phone,
-          email: b.email,
+          phone: b.phone ?? undefined,
+          email: b.email ?? undefined,
           website: webClass.url,
           websiteStatus: webClass.status,
           https: httpsSecure,
@@ -786,8 +834,8 @@ export class LeadPilotOrchestrator {
           postcode: b.postalCode || b.postcode,
           latitude: b.latitude,
           longitude: b.longitude,
-          phone: b.phone,
-          email: b.email,
+          phone: b.phone ?? undefined,
+          email: b.email ?? undefined,
           website: webClass.url,
           websiteStatus: webClass.status,
           https: httpsSecure,
@@ -795,6 +843,11 @@ export class LeadPilotOrchestrator {
           contacts,
           businessVerificationStatus: 'VERIFIED',
           locationVerificationStatus: 'VERIFIED',
+          googleRating: (b as any).rating ?? b.rawTags?.rating ?? null,
+          googleReviewCount: (b as any).reviewCount ?? b.rawTags?.userRatingCount ?? null,
+          rating: (b as any).rating ?? b.rawTags?.rating ?? null,
+          reviewCount: (b as any).reviewCount ?? b.rawTags?.userRatingCount ?? null,
+          googleMapsUrl: b.rawTags?.googleMapsUri || (googlePlaceId ? `https://www.google.com/maps/place/?q=place_id:${googlePlaceId}` : null),
           auditIssues: webClass.detectedIssues.map((issue) => ({ issue, category: 'technical' as const, severity: 'medium' as const, evidence: issue })),
           scoreBreakdown: scoreResult.breakdown,
           leadScore: scoreResult.score,
@@ -961,24 +1014,17 @@ export class LeadPilotOrchestrator {
       }
 
       // Fast response assembly with truthful metrics
-      const phoneCount = initialEntities.filter((l) => Boolean(l.phone)).length;
-      const emailCount = initialEntities.filter((l) => Boolean(l.email)).length;
-      const phoneOrEmailCount = initialEntities.filter((l) => Boolean(l.phone || l.email)).length;
-      const workingWebsiteCount = initialEntities.filter((l) => l.websiteStatus === 'Working').length;
-      const needsImprovementCount = initialEntities.filter((l) => l.websiteStatus === 'Needs Improvement').length;
+      // Phone/email/website counts use PRE-FILTER values from the full candidate pool (set at Stage 4.9).
+      // This ensures dashboard counts reflect actual discovered data, not just final-qualified leads.
       const unreachableCount = initialEntities.filter((l) => l.websiteStatus === 'Unreachable').length;
-      const noWebsiteCount = initialEntities.filter((l) => l.websiteStatus === 'No Website' || !l.website).length;
-      const websiteAvailableCount = workingWebsiteCount + needsImprovementCount;
+      const needsImprovementCount = initialEntities.filter((l) => l.websiteStatus === 'Needs Improvement').length;
 
       job.leads = initialEntities;
       job.verified = initialEntities.length;
       job.completed = initialEntities.length;
       job.qualified = initialEntities.length;
-      job.phoneCount = phoneCount;
-      job.emailCount = emailCount;
-      job.phoneOrEmailCount = phoneOrEmailCount;
-      job.websiteVerifiedCount = websiteAvailableCount;
-      job.noWebsiteCount = noWebsiteCount;
+      // Phone/email/website counts are the pre-filter candidate pool counts from Stage 4.9
+      // (already set on job.phoneCount, job.emailCount, job.phoneOrEmailCount, job.websiteVerifiedCount, job.noWebsiteCount)
       job.backgroundJobsQueued = backgroundJobsQueued;
 
       job.pipelineBreakdown = {
@@ -990,12 +1036,13 @@ export class LeadPilotOrchestrator {
         outsideLocationCount: locationOutput.rejected.length,
         unknownLocationCount: locationOutput.unknown.length,
         deduplicatedCount: deduplicationOutput.unique.length,
-        phoneCount,
-        emailCount,
-        phoneOrEmailCount,
-        websiteAvailableCount,
-        websiteUnavailableCount: noWebsiteCount,
-        verifiedNoWebsiteCount: noWebsiteCount,
+        // Pre-filter counts: how many candidates from the full pool have phone/email/website
+        phoneCount: job.phoneCount ?? prePhoneCount,
+        emailCount: job.emailCount ?? preEmailCount,
+        phoneOrEmailCount: job.phoneOrEmailCount ?? prePhoneOrEmailCount,
+        websiteAvailableCount: job.websiteVerifiedCount ?? preWebsiteCount,
+        websiteUnavailableCount: job.noWebsiteCount ?? preNoWebsiteCount,
+        verifiedNoWebsiteCount: job.noWebsiteCount ?? preNoWebsiteCount,
         websiteUnreachableCount: unreachableCount,
         websiteNeedsImprovementCount: needsImprovementCount,
         finalQualifiedCount: initialEntities.length,
@@ -1120,3 +1167,4 @@ export class LeadPilotOrchestrator {
 }
 
 export const orchestrator = new LeadPilotOrchestrator();
+export const leadPilotOrchestrator = orchestrator;

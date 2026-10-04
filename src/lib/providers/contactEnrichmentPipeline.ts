@@ -62,6 +62,7 @@ export interface ContactEnrichmentInput {
     jsonLdEmails?: string[];
     jsonLdPhones?: string[];
   };
+  skipLiveWebCrawl?: boolean;
 }
 
 export interface ContactEnrichmentOutput {
@@ -278,7 +279,7 @@ export class ContactEnrichmentPipeline {
 
     // ─── TIER 3: Live website email extraction (if no email from Tier 1/2) ──
     const hasEmail = rawContacts.some(c => c.contactType === 'EMAIL');
-    if (!hasEmail && input.websiteUrl) {
+    if (!hasEmail && input.websiteUrl && !input.skipLiveWebCrawl) {
       try {
         const extraction = await extractEmailsFromWebsite(input.websiteUrl);
         for (const email of extraction.emails) {

@@ -19,8 +19,8 @@ export class DataNormalizationActor extends BaseActor<BusinessWithScore[], LeadE
     const now = new Date().toISOString();
 
     const entities: LeadEntity[] = businesses.map((b) => {
-      const canonicalWeb = canonicalizeUrl(b.websiteUrl);
-      const cleanPhone = normalizePhone(b.phone);
+      const canonicalWeb = canonicalizeUrl(b.websiteUrl || (b as any).website);
+      const cleanPhone = normalizePhone(b.phone || (b as any).phoneNational || (b as any).phoneInternational);
       const cleanEmail = normalizeEmail(b.email);
 
       const leadId = `lead_${b.source.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${b.sourceId}`;
@@ -46,6 +46,11 @@ export class DataNormalizationActor extends BaseActor<BusinessWithScore[], LeadE
               },
             ];
 
+      const googlePlaceId = (b as any).googlePlaceId || b.rawTags?.googlePlaceId || (b.source === 'google_places' ? b.sourceId : undefined);
+      const rating = (b as any).rating ?? b.rawTags?.rating ?? null;
+      const reviewCount = (b as any).reviewCount ?? b.rawTags?.userRatingCount ?? null;
+      const googleMapsUrl = (b as any).googleMapsUrl || b.rawTags?.googleMapsUri || (googlePlaceId ? `https://www.google.com/maps/place/?q=place_id:${googlePlaceId}` : null);
+
       return {
         leadId,
         businessName: b.businessName.trim(),
@@ -54,8 +59,8 @@ export class DataNormalizationActor extends BaseActor<BusinessWithScore[], LeadE
         address: b.address.trim(),
         city: b.city || '',
         state: b.state || '',
-        country: 'India',
-        postcode: b.postcode,
+        country: (b as any).country || 'India',
+        postcode: b.postcode || (b as any).postalCode,
         latitude: b.latitude,
         longitude: b.longitude,
 
@@ -76,6 +81,13 @@ export class DataNormalizationActor extends BaseActor<BusinessWithScore[], LeadE
 
         businessVerificationStatus: b.businessVerificationStatus,
         locationVerificationStatus: 'VERIFIED',
+
+        googlePlaceId,
+        rating,
+        reviewCount,
+        googleRating: rating,
+        googleReviewCount: reviewCount,
+        googleMapsUrl,
 
         websiteAudit: b.auditResult
           ? {

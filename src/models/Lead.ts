@@ -125,6 +125,11 @@ export interface LeadEntity {
   enrichmentStatus?: 'DISCOVERED' | 'ENRICHING' | 'ENRICHED' | 'QUALIFIED' | 'REJECTED';
   auditStatus?: 'PENDING' | 'AUDITING' | 'AUDITED';
   googlePlaceId?: string;
+  googleRating?: number | null;
+  googleReviewCount?: number | null;
+  googleMapsUrl?: string | null;
+  rating?: number | null;
+  reviewCount?: number | null;
   osmId?: string;
   provenance?: Record<string, { value: any; source: string; verified: boolean }>;
 
@@ -161,6 +166,11 @@ export function leadEntityToFrontend(lead: LeadEntity): FrontendLead {
     websiteStatus: statusStr as any,
     leadScore: lead.leadScore,
     scoreBreakdown: lead.scoreBreakdown || [],
+    rating: lead.googleRating ?? lead.rating ?? null,
+    reviewCount: lead.googleReviewCount ?? lead.reviewCount ?? null,
+    googleRating: lead.googleRating ?? lead.rating ?? null,
+    googleReviewCount: lead.googleReviewCount ?? lead.reviewCount ?? null,
+    googleMapsUrl: lead.googleMapsUrl,
     auditIssues: issues.map((i) => i.issue),
     websiteIssues: issues.map((i) => i.issue),
     osmId: lead.sourceEvidence?.[0]?.sourceId ? String(lead.sourceEvidence[0].sourceId) : undefined,

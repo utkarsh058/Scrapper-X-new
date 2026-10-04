@@ -5,7 +5,7 @@ import {
   RawDiscoveredBusiness,
 } from './BusinessDiscoveryProvider';
 import { queryOverpassBusinesses } from '@/lib/overpassClient';
-import { resolveIndiaLocation } from '@/lib/geoResolver';
+import { resolveIndiaLocation, resolveLocation } from '@/lib/geoResolver';
 import { osmCircuitBreaker } from '@/lib/resilience/CircuitBreaker';
 import { semaphores, getTimeoutConfig } from '@/lib/config/concurrencyConfig';
 import { performanceTracker } from '@/lib/metrics/PerformanceTracker';
@@ -19,7 +19,6 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
     const resolvedAreaName = params.city ? `${params.city}, ${params.state}` : params.state;
     const timeouts = getTimeoutConfig();
 
-    // 0. Configuration check
     // 0. Configuration check
     if (process.env.OSM_ENABLED === 'false') {
       return {
@@ -43,7 +42,7 @@ export class OSMOverpassProvider implements BusinessDiscoveryProvider {
       // 2. Resolve bounding box if not provided
       let bbox: any = params.bbox;
       if (!bbox) {
-        bbox = await resolveIndiaLocation(params.state, params.city);
+        bbox = await resolveLocation(params.country || params.countryCode || 'India', params.state, params.city);
       }
 
       // 3. Circuit breaker + strict timeout

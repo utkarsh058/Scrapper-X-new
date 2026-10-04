@@ -193,16 +193,20 @@ export class ProviderManager {
 
     // --- STEP 2: OPENSTREETMAP AS SECONDARY / FALLBACK PROVIDER ---
     // Section 1 & 7: OSM remains available as fallback and secondary source.
-    // Only invoke OSM if Google failed, returned zero, or returned insufficient candidates
+    // Google Places = PRIMARY. OSM = OPTIONAL FALLBACK / SECONDARY.
+    // If Google Places has already discovered sufficient candidates, bypass OSM to preserve latency.
     const isOsmEnabled = health.osm.configured && health.osm.enabled;
     const googleFailed = ['FAILED', 'DISABLED', 'NOT_CONFIGURED', 'PROVIDER_NOT_CONFIGURED', 'PROVIDER_FAILURE', 'AUTH_FAILED', 'REQUEST_FAILED', 'RATE_LIMITED', 'NO_RESULTS'].includes(result.providers.googlePlaces.status);
-    const needOsm = googleFailed || result.businesses.length < requestedLimit * 1.5;
+    // OSM is used when: (1) Google failed entirely, OR (2) the candidate pool is smaller than targetPool
+    // This ensures we supplement with OSM when Google returns some but not enough candidates.
+    const needOsm = googleFailed || result.businesses.length < targetPool;
 
     if (isOsmEnabled && needOsm) {
       onProgress?.('Executing OpenStreetMap Overpass as Secondary / Fallback discovery source...');
       const oStart = Date.now();
       const osmTimeouts = getTimeoutConfig();
-      const osmTimeoutMs = Math.max(osmTimeouts.osmFastMs || 6000, 10000);
+      // Bounded fast timeout so OSM cannot stall the pipeline
+      const osmTimeoutMs = Math.min(osmTimeouts.osmFastMs || 5000, 5000);
 
       try {
         const osmRes = await withTimeout(
@@ -234,13 +238,14 @@ export class ProviderManager {
         const errMsg = oErr.message || '';
         const isRate = errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('busy');
         result.providers.osm = {
-          status: (isRate ? 'RATE_LIMITED' : 'REQUEST_FAILED') as any,
+          status: (isRate ? 'RATE_LIMITED' : 'FAILED') as any,
           rawCount: 0,
           discovered: 0,
           durationMs: result.latencies.osmMs,
-          reason: errMsg,
+          reason: `OpenStreetMap fallback encountered an error: ${errMsg}`,
           errors: [errMsg],
         };
+        // NOTE: Google Places results are preserved and continue independently.
       }
     } else if (isOsmEnabled && !needOsm) {
       result.providers.osm = {
@@ -248,7 +253,7 @@ export class ProviderManager {
         rawCount: 0,
         discovered: 0,
         durationMs: 0,
-        reason: 'Google Places provided sufficient candidates; OSM supplemental discovery bypassed for latency.',
+        reason: 'Google Places primary provider returned sufficient candidates; OSM supplemental query bypassed.',
         errors: [],
       };
     } else {
@@ -264,13 +269,13 @@ export class ProviderManager {
 
     // --- STEP 3: SUPPLEMENTAL WEB SEARCH / DIRECTORY IF NEEDED ---
     const currentCount = result.businesses.length;
-    if (currentCount < requestedLimit) {
+    if (currentCount < requestedLimit && googleFailed) {
       onProgress?.('Supplementing discovery pool with public web search...');
       const wStart = Date.now();
       try {
         const webRes = await withTimeout(
           webSearchDiscoveryProvider.discoverBusinesses(params),
-          5000,
+          3000,
           'Web Search Discovery'
         );
         result.latencies.webMs = Date.now() - wStart;

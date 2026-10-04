@@ -2,11 +2,15 @@ import { BaseActor, ActorContext } from '@/models/Actor';
 import { RawDiscoveredBusiness } from '@/providers/BusinessDiscoveryProvider';
 import { isCoordinateInLocation, MAJOR_CITIES_BOUNDS, STATE_BOUNDS } from '@/lib/geoResolver';
 import { INDIAN_STATES_AND_UTS, COMMON_CITY_ALIASES } from '@/data/indiaLocations';
+import { resolveCountry } from '@/lib/location/CountryRegistry';
+import { resolveRegion } from '@/lib/location/RegionRegistry';
 
 export interface LocationVerificationInput {
   businesses: RawDiscoveredBusiness[];
   state: string;
   city?: string;
+  country?: string;
+  countryCode?: 'IN' | 'US' | 'CA' | string;
 }
 
 export interface LocationVerificationOutput {
@@ -245,16 +249,89 @@ export class LocationVerificationActor extends BaseActor<LocationVerificationInp
     data: LocationVerificationOutput;
     sources: string[];
   }> {
-    const { businesses, state, city } = context.input;
+    const { businesses, state, city, country, countryCode } = context.input;
     context.onProgress?.(`Verifying geographic boundaries for ${businesses.length} candidates...`);
 
     const verified: RawDiscoveredBusiness[] = [];
     const unknown: RawDiscoveredBusiness[] = [];
     const rejected: { business: RawDiscoveredBusiness; reason: string }[] = [];
 
+    const stateIsCanada = state?.toLowerCase() === 'ontario' || resolveRegion('CA', state) !== null;
+    const resolvedCountry = resolveCountry(countryCode || country || (stateIsCanada ? 'CA' : 'IN'));
+    const isUSA = resolvedCountry?.code === 'US';
+    const isCanada = resolvedCountry?.code === 'CA';
+    const isInternational = isUSA || isCanada;
+
     const targetCity = city && city.trim().toLowerCase() !== 'all cities in this state' ? city.trim() : undefined;
     const reqCityLower = targetCity ? targetCity.toLowerCase() : '';
     const reqStateLower = state ? state.trim().toLowerCase() : '';
+
+    if (isInternational && resolvedCountry) {
+      const region = resolveRegion(resolvedCountry.code, state);
+
+      for (const b of businesses) {
+        const hasCoords = typeof b.latitude === 'number' &&
+          typeof b.longitude === 'number' &&
+          !isNaN(b.latitude) &&
+          !isNaN(b.longitude) &&
+          (b.latitude !== 0 || b.longitude !== 0);
+
+        const addrLower = (b.address || '').toLowerCase();
+        const cityTagLower = (b.rawTags?.['addr:city'] || b.city || '').toLowerCase().trim();
+
+        if (hasCoords) {
+          const inCountry =
+            b.latitude! >= resolvedCountry.bounds.south &&
+            b.latitude! <= resolvedCountry.bounds.north &&
+            b.longitude! >= resolvedCountry.bounds.west &&
+            b.longitude! <= resolvedCountry.bounds.east;
+
+          if (!inCountry) {
+            rejected.push({ business: b, reason: 'OUTSIDE_LOCATION' });
+            continue;
+          }
+
+          if (region && region.bounds) {
+            const inRegion =
+              b.latitude! >= region.bounds.south - 0.5 &&
+              b.latitude! <= region.bounds.north + 0.5 &&
+              b.longitude! >= region.bounds.west - 0.5 &&
+              b.longitude! <= region.bounds.east + 0.5;
+
+            if (inRegion) {
+              verified.push(b);
+              continue;
+            }
+          }
+
+          if (targetCity && (cityTagLower.includes(reqCityLower) || addrLower.includes(reqCityLower))) {
+            verified.push(b);
+            continue;
+          }
+
+          unknown.push(b);
+          continue;
+        }
+
+        // Coordinates missing:
+        if (targetCity && (cityTagLower.includes(reqCityLower) || addrLower.includes(reqCityLower))) {
+          verified.push(b);
+          continue;
+        }
+
+        if (region && (addrLower.includes(region.name.toLowerCase()) || addrLower.includes(region.code.toLowerCase()))) {
+          verified.push(b);
+          continue;
+        }
+
+        unknown.push(b);
+      }
+
+      return {
+        data: { verified, unknown, rejected },
+        sources: ['location_registry', 'geo_bounds'],
+      };
+    }
 
     for (const b of businesses) {
       const hasCoords = typeof b.latitude === 'number' &&

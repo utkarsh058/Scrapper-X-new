@@ -592,50 +592,83 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
 
       {/* 2. DYNAMIC REAL SUMMARY BAR (SECTION 10) */}
       {hasSearched && !isSearching && leads.length > 0 && (
-        <div className="px-5 py-3 bg-[#F8FAFC] border-b border-[#E2E8F0] flex flex-wrap items-center gap-3 text-[12px]">
-          <span className="font-bold text-[#0F172A]">
-            {dynamicSummary.total} Businesses Found
-          </span>
-          <span className="text-[#CBD5E1]">•</span>
-          <span className="text-[#334155] font-medium">
-            <strong className="text-[#0F172A]">{dynamicSummary.hasPhoneOrEmail}</strong> Phone or Email
-          </span>
-          <span className="text-[#CBD5E1]">•</span>
-          <span className="text-[#334155] font-medium">
-            <strong className="text-[#0F172A]">{dynamicSummary.emailAndPhone}</strong> Email + Phone
-          </span>
-          <span className="text-[#CBD5E1]">•</span>
-          <span className="text-[#334155] font-medium">
-            <strong className="text-[#0F172A]">{dynamicSummary.withPhone}</strong> Phone Available
-          </span>
-          <span className="text-[#CBD5E1]">•</span>
-          <span className="text-[#334155] font-medium">
-            <strong className="text-[#0F172A]">{dynamicSummary.withEmail}</strong> Email Available
-          </span>
-          <span className="text-[#CBD5E1]">•</span>
-          <span className="text-[#334155] font-medium">
-            <strong className="text-[#64748B]">{dynamicSummary.noContact}</strong> Without Contact
-          </span>
-          <span className="text-[#CBD5E1]">•</span>
-          <span className="text-[#334155] font-medium">
-            <strong className="text-rose-700">{dynamicSummary.noWebsite}</strong> No Website
-          </span>
-          <span className="text-[#CBD5E1]">•</span>
-          <span className="text-[#334155] font-medium">
-            <strong className="text-emerald-700">{dynamicSummary.workingWebsite}</strong> Working Website
-          </span>
-          <span className="text-[#CBD5E1]">•</span>
-          <span className="text-[#334155] font-medium">
-            <strong className="text-amber-700">{dynamicSummary.needsImprovement}</strong> Needs Improvement
-          </span>
-          {dynamicSummary.unreachable > 0 && (
-            <>
-              <span className="text-[#CBD5E1]">•</span>
-              <span className="text-[#334155] font-medium">
-                <strong className="text-red-700">{dynamicSummary.unreachable}</strong> Unreachable
-              </span>
-            </>
-          )}
+        <div className="space-y-0">
+          <div className="px-5 py-3 bg-[#F8FAFC] border-b border-[#E2E8F0] flex flex-wrap items-center gap-3 text-[12px]">
+            <span className="font-bold text-[#0F172A]">
+              {dynamicSummary.total} Businesses Found
+            </span>
+            <span className="text-[#CBD5E1]">•</span>
+            <span className="text-[#334155] font-medium">
+              <strong className="text-[#0F172A]">{dynamicSummary.hasPhoneOrEmail}</strong> Phone or Email
+            </span>
+            <span className="text-[#CBD5E1]">•</span>
+            <span className="text-[#334155] font-medium">
+              <strong className="text-[#0F172A]">{dynamicSummary.emailAndPhone}</strong> Email + Phone
+            </span>
+            <span className="text-[#CBD5E1]">•</span>
+            <span className="text-[#334155] font-medium">
+              <strong className="text-[#0F172A]">{dynamicSummary.withPhone}</strong> Phone Available
+            </span>
+            <span className="text-[#CBD5E1]">•</span>
+            <span className="text-[#334155] font-medium">
+              <strong className="text-[#0F172A]">{dynamicSummary.withEmail}</strong> Email Available
+            </span>
+            <span className="text-[#CBD5E1]">•</span>
+            <span className="text-[#334155] font-medium">
+              <strong className="text-[#64748B]">{dynamicSummary.noContact}</strong> Without Contact
+            </span>
+            <span className="text-[#CBD5E1]">•</span>
+            <span className="text-[#334155] font-medium">
+              <strong className="text-rose-700">{dynamicSummary.noWebsite}</strong> No Website
+            </span>
+            <span className="text-[#CBD5E1]">•</span>
+            <span className="text-[#334155] font-medium">
+              <strong className="text-emerald-700">{dynamicSummary.workingWebsite}</strong> Working Website
+            </span>
+            <span className="text-[#CBD5E1]">•</span>
+            <span className="text-[#334155] font-medium">
+              <strong className="text-amber-700">{dynamicSummary.needsImprovement}</strong> Needs Improvement
+            </span>
+            {dynamicSummary.unreachable > 0 && (
+              <>
+                <span className="text-[#CBD5E1]">•</span>
+                <span className="text-[#334155] font-medium">
+                  <strong className="text-red-700">{dynamicSummary.unreachable}</strong> Unreachable
+                </span>
+              </>
+            )}
+          </div>
+
+          {/* Social Intelligence V2 Summary (Section 15) */}
+          {(() => {
+            const allProfiles = leads.flatMap((l) => (l as any).social || []);
+            const totalSocialFound = allProfiles.length;
+            if (totalSocialFound === 0) return null;
+
+            const verifiedProfiles = allProfiles.filter(
+              (p) => p.verificationStatus === 'VERIFIED' || (p.confidence !== null && p.confidence >= 0.8)
+            ).length;
+            const metricsAvailable = allProfiles.filter((p) => p.followers !== null && p.followers !== undefined).length;
+            const metricsNotAvailable = totalSocialFound - metricsAvailable;
+            const apisNotConfigured = allProfiles.filter((p) => p.metricStatus === 'NOT_CONFIGURED').length;
+
+            return (
+              <div className="px-5 py-2 bg-slate-50 border-b border-[#E2E8F0] flex flex-wrap items-center gap-3 text-[11.5px] text-[#475569]">
+                <span className="font-bold text-teal-900 uppercase text-[10.5px] tracking-wide">
+                  Social Intelligence:
+                </span>
+                <span>Profiles Found: <strong className="text-[#0F172A]">{totalSocialFound}</strong></span>
+                <span className="text-[#CBD5E1]">•</span>
+                <span>Identity Verified: <strong className="text-teal-700">{verifiedProfiles}</strong></span>
+                <span className="text-[#CBD5E1]">•</span>
+                <span>Metrics Available: <strong className="text-emerald-700">{metricsAvailable}</strong></span>
+                <span className="text-[#CBD5E1]">•</span>
+                <span>Metrics Not Available: <strong className="text-[#64748B]">{metricsNotAvailable}</strong></span>
+                <span className="text-[#CBD5E1]">•</span>
+                <span>APIs Not Configured: <strong className="text-amber-700">{apisNotConfigured}</strong></span>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -945,11 +978,21 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                         <span className="font-semibold text-[#0F172A] group-hover:text-teal-700 transition-colors">
                           {lead.businessName}
                         </span>
-                        {lead.category && (
-                          <span className="text-[11px] text-[#64748B] capitalize">
-                            {lead.category}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {lead.category && (
+                            <span className="text-[11px] text-[#64748B] capitalize">
+                              {lead.category}
+                            </span>
+                          )}
+                          {typeof (lead as any).rating === 'number' && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10.5px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                              ★ {(lead as any).rating.toFixed(1)}
+                              {typeof (lead as any).reviewCount === 'number' && (
+                                <span className="text-amber-600 font-normal">({(lead as any).reviewCount.toLocaleString()})</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
 
@@ -988,7 +1031,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                           <span>{phone}</span>
                         </a>
                       ) : (
-                        <span className="text-[#94A3B8]">N/A</span>
+                        <span className="text-[#94A3B8] text-[11px]">Not available</span>
                       )}
                     </td>
 
@@ -1008,7 +1051,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                           <span className="truncate max-w-[140px]">{email}</span>
                         </a>
                       ) : (
-                        <span className="text-[#94A3B8]">N/A</span>
+                        <span className="text-[#94A3B8] text-[11px]">Not available</span>
                       )}
                     </td>
 
@@ -1027,7 +1070,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                           <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
                         </a>
                       ) : (
-                        <span className="text-[#94A3B8]">N/A</span>
+                        <span className="text-[#94A3B8] text-[11px]">Not available</span>
                       )}
                     </td>
 

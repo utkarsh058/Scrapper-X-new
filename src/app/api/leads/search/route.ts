@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isValidIndianState } from '@/data/indiaLocations';
+import { resolveCountry } from '@/lib/location/CountryRegistry';
+import { resolveRegion } from '@/lib/location/RegionRegistry';
 import { pipelineOrchestrator } from '@/lib/orchestrator/pipelineOrchestrator';
 import { searchService } from '@/services/SearchService';
 import { jobManager } from '@/jobs/JobManager';
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
 
     const {
       country = 'India',
+      countryCode,
       state,
       city,
       industry,
@@ -38,12 +40,13 @@ export async function POST(req: NextRequest) {
       limit = 100,
     } = body;
 
-    // 1. Strict Location Validation
-    if (country !== 'India') {
+    // 1. Strict Multi-Country Location Validation
+    const resolvedCountry = resolveCountry(countryCode || country);
+    if (!resolvedCountry) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Restricted to India only. Foreign locations are not permitted.',
+          error: `Unsupported country: "${country}". LeadPilot supports India, United States, and Canada.`,
           code: 'INVALID_COUNTRY',
           leads: [],
         },
@@ -51,11 +54,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!state || !isValidIndianState(state)) {
+    const resolvedRegion = state ? resolveRegion(resolvedCountry.code, state) : null;
+    if (!state || !resolvedRegion) {
       return NextResponse.json(
         {
           success: false,
-          error: `Invalid Indian State or Union Territory: "${state}". Please select a valid region in India.`,
+          error: `Invalid State or Province for ${resolvedCountry.name}: "${state}". Please select a valid state, province, or territory.`,
           code: 'INVALID_STATE',
           leads: [],
         },
@@ -77,13 +81,15 @@ export async function POST(req: NextRequest) {
 
     const requestedLimit = Math.min(Math.max(Number(limit) || 25, 5), 250);
     const searchPayload = {
-      country: 'India',
-      state,
+      country: resolvedCountry.name,
+      countryCode: resolvedCountry.code,
+      state: resolvedRegion.name,
       city: city ? String(city).trim() : undefined,
       industry: industry.trim(),
       contactFilter,
       websiteFilter,
       limit: requestedLimit,
+      excludePerfectRating: body.excludePerfectRating !== false,
     };
 
     // If caller explicitly requests pipeline orchestrator engine

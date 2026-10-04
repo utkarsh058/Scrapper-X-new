@@ -251,8 +251,17 @@ export class MultiSourceMergeActor extends BaseActor<RawDiscoveredBusiness[], Mu
 
         // Enrich missing fields from candidate
         if (!target.phone && item.phone) target.phone = item.phone;
+        if (!target.phoneNational && item.phoneNational) target.phoneNational = item.phoneNational;
+        if (!target.phoneInternational && item.phoneInternational) target.phoneInternational = item.phoneInternational;
         if (!target.email && item.email) target.email = item.email;
         if (!target.website && item.website) target.website = item.website;
+        if (!target.websiteUrl && item.websiteUrl) target.websiteUrl = item.websiteUrl;
+        if (!target.googleMapsUrl && item.googleMapsUrl) target.googleMapsUrl = item.googleMapsUrl;
+        if ((target.rating === undefined || target.rating === null) && item.rating !== undefined && item.rating !== null) target.rating = item.rating;
+        if ((target.reviewCount === undefined || target.reviewCount === null) && item.reviewCount !== undefined && item.reviewCount !== null) target.reviewCount = item.reviewCount;
+        if (!target.businessStatus && item.businessStatus) target.businessStatus = item.businessStatus;
+        if (!target.primaryType && item.primaryType) target.primaryType = item.primaryType;
+        if (!target.primaryTypeDisplayName && item.primaryTypeDisplayName) target.primaryTypeDisplayName = item.primaryTypeDisplayName;
         if (!target.latitude && item.latitude) {
           target.latitude = item.latitude;
           target.longitude = item.longitude;

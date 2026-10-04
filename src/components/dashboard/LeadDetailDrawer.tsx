@@ -23,7 +23,9 @@ import {
   Download,
   CheckCircle2,
   Clock,
-  ShieldAlert
+  ShieldAlert,
+  Star,
+  Share2
 } from 'lucide-react';
 import { Lead, OutreachRecord } from '@/types';
 import { getLeadWebsiteStatusBadge, WebsiteBadgeConfig } from '@/utils/statusUtils';
@@ -60,6 +62,10 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
   const [modalSubject, setModalSubject] = useState('');
   const [modalBody, setModalBody] = useState('');
 
+  // Commercial Milestone state
+  const [commercialMilestones, setCommercialMilestones] = useState<any[]>([]);
+  const [loadingMilestones, setLoadingMilestones] = useState(false);
+
   // Demo state
   const [isGeneratingDemo, setIsGeneratingDemo] = useState(false);
   const [demoReady, setDemoReady] = useState(false);
@@ -85,6 +91,22 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
     }
   };
 
+  const fetchCommercialMilestones = async () => {
+    if (!lead?.id) return;
+    setLoadingMilestones(true);
+    try {
+      const res = await fetch(`/api/businesses/${lead.id}/commercial`);
+      const data = await res.json();
+      if (data.success) {
+        setCommercialMilestones(data.milestones || []);
+      }
+    } catch {
+      setCommercialMilestones([]);
+    } finally {
+      setLoadingMilestones(false);
+    }
+  };
+
   useEffect(() => {
     if (lead) {
       setOutreachMessage(null);
@@ -95,6 +117,7 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
       setPreviewDemoOpen(false);
       setIsPreviewModalOpen(false);
       fetchOutreachHistory();
+      fetchCommercialMilestones();
     }
   }, [lead?.id]);
 
@@ -393,6 +416,304 @@ export const LeadDetailDrawer: React.FC<LeadDetailDrawerProps> = ({
                 ))}
               </ul>
             </div>
+          </div>
+
+          {/* Section: Google Maps & Business Intelligence */}
+          <div className="p-4 rounded-xl border border-[#E2E8F0] bg-white space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-[#475569] uppercase tracking-wider flex items-center gap-1.5">
+                <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />
+                Google Business Intelligence
+              </span>
+              {(lead as any).googleRating !== undefined && (lead as any).googleRating !== null && (
+                <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                  Eligible ({(lead as any).googleRating === 5.0 ? '5.0 Excluded' : 'Non-5.0'})
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-[12px]">
+              <div className="bg-[#F8FAFC] p-2.5 rounded-lg border border-[#E2E8F0]">
+                <span className="text-[#64748B] text-[10.5px] block">Google Rating</span>
+                <span className="text-[15px] font-bold text-[#0F172A] flex items-center gap-1">
+                  {(lead as any).googleRating ? (
+                    <>
+                      <span>{(lead as any).googleRating.toFixed(1)}</span>
+                      <span className="text-amber-500 text-[13px]">★</span>
+                    </>
+                  ) : (
+                    <span className="text-[#94A3B8] font-normal text-[12px]">Not available</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="bg-[#F8FAFC] p-2.5 rounded-lg border border-[#E2E8F0]">
+                <span className="text-[#64748B] text-[10.5px] block">Google Reviews</span>
+                <span className="text-[15px] font-bold text-[#0F172A]">
+                  {(lead as any).googleReviewCount !== undefined && (lead as any).googleReviewCount !== null ? (
+                    (lead as any).googleReviewCount.toLocaleString()
+                  ) : (
+                    <span className="text-[#94A3B8] font-normal text-[12px]">Not available</span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-[#64748B] space-y-1">
+              <div>
+                GMB Profile Age: <strong className="text-[#334155] font-mono">Not Available</strong> (exact creation date unexposed by Places API)
+              </div>
+              {(lead as any).googleMapsUrl && (
+                <div>
+                  <a
+                    href={(lead as any).googleMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-teal-700 hover:text-teal-800 hover:underline inline-flex items-center gap-1 font-medium"
+                  >
+                    <span>View on Google Maps</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Section: Public Social Media Intelligence */}
+          <div className="p-4 rounded-xl border border-[#E2E8F0] bg-white space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-[#475569] uppercase tracking-wider flex items-center gap-1.5">
+                <Share2 className="h-3.5 w-3.5 text-blue-600" />
+                Public Social Media Intelligence
+              </span>
+              <span className="text-[10px] text-[#64748B]">Real Verified Links</span>
+            </div>
+
+            {(() => {
+              const socialList = (lead as any).social || [];
+              const legacyLinks = (lead as any).socialLinks || {};
+              const hasAnySocial = socialList.length > 0 || Object.keys(legacyLinks).length > 0;
+
+              if (!hasAnySocial) {
+                return (
+                  <p className="text-[12px] text-[#94A3B8] italic">
+                    No verified public social links detected on official website or metadata.
+                  </p>
+                );
+              }
+
+              return (
+                <div className="space-y-2.5">
+                  {socialList.map((soc: any, idx: number) => {
+                    const isSubscribers = soc.platform === 'youtube';
+                    const metricLabel = isSubscribers ? 'Subscribers' : 'Followers';
+                    const hasMetric = soc.followers !== null && soc.followers !== undefined;
+                    const metricValue = hasMetric
+                      ? (soc.displayFollowerCount || soc.followers.toLocaleString())
+                      : 'Not available';
+
+                    // Human-readable status mapping
+                    const statusText =
+                      soc.metricStatus === 'AVAILABLE'
+                        ? (soc.metricSourceType === 'PUBLIC_WEB' ? 'Public web verified' : 'Official API verified')
+                        : soc.metricStatus === 'NOT_CONFIGURED'
+                        ? 'API not configured'
+                        : soc.metricStatus === 'UNAUTHORIZED'
+                        ? 'Unauthorized'
+                        : soc.metricStatus === 'RATE_LIMITED'
+                        ? 'Rate limited'
+                        : soc.metricStatus === 'API_ERROR'
+                        ? 'API error'
+                        : soc.metricStatus === 'PROFILE_NOT_FOUND'
+                        ? 'Profile not found'
+                        : 'Not available';
+
+                    const isVerified = soc.verified === true || soc.verificationStatus === 'VERIFIED';
+
+                    // Format creation date with strict precision preservation
+                    const getCreatedInfo = () => {
+                      const precision = soc.accountCreatedDatePrecision;
+                      const status = soc.accountCreatedStatus;
+                      const dateVal = soc.accountCreatedAt || soc.createdAt;
+
+                      if (!dateVal || status === 'NOT_AVAILABLE' || status === 'CONFLICT') {
+                        return {
+                          text: 'Not available',
+                          badge: status === 'CONFLICT' ? 'Conflict' : null,
+                          isConflict: status === 'CONFLICT',
+                        };
+                      }
+
+                      const d = new Date(dateVal);
+                      if (isNaN(d.getTime())) {
+                        return { text: 'Not available', badge: null, isConflict: false };
+                      }
+
+                      const monthNames = [
+                        'January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'
+                      ];
+
+                      if (precision === 'YEAR' || status === 'VERIFIED_YEAR') {
+                        return {
+                          text: String(d.getUTCFullYear()),
+                          badge: 'Verified year',
+                          isConflict: false,
+                        };
+                      }
+
+                      if (precision === 'MONTH' || status === 'VERIFIED_MONTH') {
+                        return {
+                          text: `${monthNames[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+                          badge: 'Verified month',
+                          isConflict: false,
+                        };
+                      }
+
+                      return {
+                        text: `${monthNames[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`,
+                        badge: 'Verified',
+                        isConflict: false,
+                      };
+                    };
+
+                    const createdInfo = getCreatedInfo();
+
+                    const getFirstObservedFormatted = () => {
+                      if (!soc.firstObservedAt) return null;
+                      const d = new Date(soc.firstObservedAt);
+                      if (isNaN(d.getTime())) return null;
+                      const monthNames = [
+                        'January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'
+                      ];
+                      return `${monthNames[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+                    };
+
+                    const firstObservedFormatted = getFirstObservedFormatted();
+
+                    return (
+                      <div key={idx} className="p-2.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] text-[11.5px] space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-teal-800 uppercase text-[10px] px-1.5 py-0.5 rounded bg-teal-50 border border-teal-200">
+                              {soc.platform}
+                            </span>
+                            <a
+                              href={soc.profileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[#0F172A] font-semibold hover:text-teal-700 hover:underline truncate max-w-[200px]"
+                            >
+                              {soc.username ? `@${soc.username}` : soc.profileUrl}
+                            </a>
+                            {isVerified && (
+                              <span className="px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                Verified
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right text-[11px]">
+                            <span className="text-[#64748B]">{metricLabel}: </span>
+                            <strong className="text-[#0F172A]">{metricValue}</strong>
+                          </div>
+                        </div>
+
+                        {/* Account Created & First Observed Section */}
+                        <div className="flex flex-wrap items-center justify-between text-[11px] bg-white p-2 rounded-md border border-[#E2E8F0] gap-2">
+                          <div>
+                            <span className="text-[#64748B] block text-[10px]">Account created</span>
+                            <div className="flex items-center gap-1.5">
+                              <strong className="text-[#0F172A]">{createdInfo.text}</strong>
+                              {createdInfo.badge && (
+                                <span className={`px-1.5 py-0.2 rounded text-[9px] font-semibold ${
+                                  createdInfo.isConflict
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                }`}>
+                                  {createdInfo.badge}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {firstObservedFormatted && (
+                            <div className="text-right">
+                              <span className="text-[#64748B] block text-[10px]">First publicly observed</span>
+                              <strong className="text-[#334155]">{firstObservedFormatted}</strong>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] text-[#64748B] pt-0.5 border-t border-[#E2E8F0]/60">
+                          <div className="flex items-center gap-2">
+                            <span>Status: <strong className="text-[#334155]">{statusText}</strong></span>
+                            {soc.metricSource && (
+                              <>
+                                <span>•</span>
+                                <span>Source: <strong className="text-[#334155]">{soc.metricSource}</strong></span>
+                              </>
+                            )}
+                          </div>
+                          {soc.followersFetchedAt && (
+                            <span>Updated: {new Date(soc.followersFetchedAt).toLocaleDateString()}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Section: Commercial Milestones */}
+          <div className="p-4 rounded-xl border border-[#E2E8F0] bg-white space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-[#475569] uppercase tracking-wider flex items-center gap-1.5">
+                <Building2 className="h-3.5 w-3.5 text-blue-600" />
+                Commercial Milestones
+              </span>
+              {loadingMilestones && (
+                <Loader2 className="h-3 w-3 animate-spin text-[#64748B]" />
+              )}
+            </div>
+
+            {loadingMilestones ? (
+              <p className="text-[12px] text-[#94A3B8] italic">Loading milestones...</p>
+            ) : commercialMilestones.length === 0 ? (
+              <p className="text-[12px] text-[#94A3B8] italic">
+                Not publicly available.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {commercialMilestones.map((m: any, idx: number) => (
+                  <div key={idx} className="p-2.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] text-[11px] space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-indigo-800 uppercase text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200">
+                          {m.metricType}
+                        </span>
+                        {m.period && (
+                          <span className="font-semibold text-[#0F172A]">{m.period}</span>
+                        )}
+                      </div>
+                      <div className="text-right font-bold text-emerald-700 text-[12px]">
+                        {m.formattedAmount}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-[#64748B]">
+                      <div className="truncate max-w-[200px]" title={m.evidenceText}>
+                        <span className="italic">&quot;{m.evidenceText}&quot;</span>
+                      </div>
+                      <a href={m.sourceUrl} target="_blank" rel="noreferrer" className="text-teal-700 hover:underline flex items-center gap-1">
+                        Source <ExternalLink className="h-2.5 w-2.5" />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Primary Actions: [ Audit Website ] [ Generate AI Message ] [ Create Website Demo ] */}
