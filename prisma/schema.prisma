@@ -108,24 +108,35 @@ model Contact {
 }
 
 model ContactVerification {
-  id              String   @id @default(cuid())
-  contactId       String
-  provider        String                // dns_mx | libphonenumber | twilio_lookup | zerobounce | hunter | internal
-  status          String                // VERIFIED | INVALID | RISKY | UNKNOWN | DISPOSABLE | ROLE_BASED | BOUNCED | UNAVAILABLE | FORMAT_VALID | DOMAIN_VALID | MX_VALID | DELIVERABILITY_VERIFIED
-  level           String   @default("SYNTAX")  // SYNTAX | DOMAIN | MX | DELIVERABILITY | CARRIER
-  hasValidSyntax  Boolean  @default(false)
-  hasMxRecords    Boolean?
-  isDisposable    Boolean  @default(false)
-  isRoleBased     Boolean  @default(false)
-  lineType        String?               // MOBILE | LANDLINE | VOIP | UNKNOWN
-  carrier         String?
-  confidence      Float    @default(0.0)
-  details         String?               // JSON: provider-specific details
-  verifiedAt      DateTime @default(now())
-  contact         Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  id                String    @id @default(cuid())
+  contactId         String
+  type              String?               // PHONE | EMAIL
+  normalizedValue   String?
+  provider          String                // dns_mx | libphonenumber | twilio_lookup | zerobounce | hunter | internal
+  status            String                // VERIFIED | INVALID | RISKY | UNKNOWN | DISPOSABLE | ROLE_BASED | BOUNCED | UNAVAILABLE | FORMAT_VALID | DOMAIN_VALID | MX_VALID | DELIVERABILITY_VERIFIED
+  level             String    @default("SYNTAX")  // SYNTAX | DOMAIN | MX | DELIVERABILITY | CARRIER
+  providerStatus    String?               // READY | NOT_CONFIGURED | RATE_LIMITED | TIMEOUT | AUTH_FAILED | PROVIDER_ERROR | QUOTA_EXCEEDED | UNAVAILABLE
+  providerRequestId String?
+  errorCode         String?
+  hasValidSyntax    Boolean   @default(false)
+  hasMxRecords      Boolean?
+  isDisposable      Boolean   @default(false)
+  isRoleBased       Boolean   @default(false)
+  lineType          String?               // MOBILE | LANDLINE | VOIP | UNKNOWN
+  carrier           String?
+  confidence        Float     @default(0.0)
+  evidence          String?               // Raw verification evidence snippet / reason
+  details           String?               // JSON: provider-specific details
+  verifiedAt        DateTime  @default(now())
+  expiresAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+  contact           Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([contactId])
   @@index([provider])
+  @@index([normalizedValue, provider])
+  @@index([expiresAt])
 }
 
 model Website {
