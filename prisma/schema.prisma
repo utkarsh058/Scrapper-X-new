@@ -597,11 +597,22 @@ model SenderAccount {
   status            String     @default("CONNECTED") // "CONNECTED" | "DISCONNECTED" | "EXPIRED" | "REVOKED"
   lastError         String?
   lastUsedAt        DateTime?
+  
+  // Adaptive Capacity
+  currentCapacity   Int        @default(25)
+  startingCapacity  Int        @default(25)
+  configuredMaximum Int        @default(200)
+  incrementStep     Int        @default(5)
+  healthState       String     @default("HEALTHY") // HEALTHY, WARNING, CRITICAL, PAUSED, REAUTH_REQUIRED, ERROR
+  lastHealthEvaluation DateTime?
+  lastCapacityChange   DateTime?
+
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
   user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   campaigns         Campaign[]
   outreaches        Outreach[]
+  capacityHistory   CapacityHistory[]
 
   @@unique([userId, email, provider])
   @@index([userId])
@@ -647,6 +658,36 @@ model CommercialEvidence {
   milestone           CommercialMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
 
   @@index([milestoneId])
+}
+
+model CapacityHistory {
+  id               String        @id @default(cuid())
+  senderAccountId  String
+  previousCapacity Int
+  newCapacity      Int
+  reason           String
+  healthState      String
+  createdAt        DateTime      @default(now())
+
+  senderAccount    SenderAccount @relation(fields: [senderAccountId], references: [id], onDelete: Cascade)
+
+  @@index([senderAccountId])
+  @@index([createdAt])
+}
+
+model DomainHealth {
+  id               String    @id @default(cuid())
+  domain           String    @unique
+  parentDomain     String?
+  spfStatus        String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
+  dkimStatus       String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
+  dmarcStatus      String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
+  healthState      String    @default("HEALTHY") // HEALTHY, WARNING, CRITICAL, PAUSED
+  lastEvaluation   DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([healthState])
 }
 
 

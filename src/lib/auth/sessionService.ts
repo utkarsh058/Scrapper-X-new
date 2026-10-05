@@ -89,25 +89,28 @@ export async function createSession(userId: string): Promise<string> {
  * Returns undefined if not authenticated or session expired.
  */
 export async function getAuthenticatedUserId(): Promise<string | undefined> {
-  const cookieStore = await cookies();
-  const cookie = cookieStore.get(COOKIE_NAME);
-  if (!cookie?.value) return undefined;
-
-  const token = verifySignedCookie(cookie.value);
-  if (!token) return undefined;
-
-  const session = await prisma.session.findUnique({
-    where: { sessionToken: token },
+  // Application login is disabled. Return the default admin user.
+  let defaultUser = await prisma.user.findFirst({
+    where: { role: 'ADMIN' },
   });
 
-  if (!session) return undefined;
-  if (session.expiresAt < new Date()) {
-    // Expired session — clean up
-    await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
-    return undefined;
+  if (!defaultUser) {
+    // If no admin exists, just find any user
+    defaultUser = await prisma.user.findFirst();
+    
+    // If database is completely empty, create the default internal admin
+    if (!defaultUser) {
+      defaultUser = await prisma.user.create({
+        data: {
+          email: 'admin@leadpilot.internal',
+          name: 'Internal Admin',
+          role: 'ADMIN',
+        },
+      });
+    }
   }
 
-  return session.userId;
+  return defaultUser.id;
 }
 
 /**

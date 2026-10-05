@@ -235,23 +235,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               </div>
 
-              <div className="border-t border-[#F1F5F9] pt-1">
-                <button
-                  onClick={async () => {
-                    setProfileMenuOpen(false);
-                    try {
-                      await fetch('/api/auth/logout', { method: 'POST' });
-                    } catch {
-                      // ignore error and redirect
-                    }
-                    window.location.href = '/login';
-                  }}
-                  className="w-full flex items-center gap-2 px-3.5 py-1.5 text-left text-red-600 hover:bg-red-50"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span>Sign out</span>
-                </button>
-              </div>
             </div>
           )}
         </div>

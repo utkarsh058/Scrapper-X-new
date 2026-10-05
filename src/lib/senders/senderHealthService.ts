@@ -68,12 +68,13 @@ export class SenderHealthService {
     lastUsedAt?: Date | null;
     tokenExpiry?: Date | null;
     refreshToken?: string | null;
+    currentCapacity?: number;
   }): Promise<SenderHealthMetrics> {
     const todayMidnight = this.getTodayMidnightUtc();
     const sevenDaysAgo = this.getSevenDaysAgo();
     const domain = senderAccount.email.split('@')[1] || 'unknown';
     const config = CapacityConfigService.getConfig();
-    const limit = config.maxPerSenderPerDay;
+    const limit = senderAccount.currentCapacity !== undefined ? senderAccount.currentCapacity : config.maxPerSenderPerDay;
 
     // 1. Sent today
     let sentTodayCount = 0;
@@ -306,6 +307,7 @@ export class SenderHealthService {
         tokenExpiry: true,
         refreshToken: true,
         createdAt: true,
+        currentCapacity: true,
       },
       orderBy: { createdAt: 'asc' },
     });
