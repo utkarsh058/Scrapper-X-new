@@ -29,6 +29,7 @@ model Business {
   businessStatus   String               @default("OPERATIONAL")
   opportunityScore Int                  @default(0)
   status           String               @default("New")
+  firstKnownGmvDate String?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
   sources          BusinessSource[]
@@ -46,6 +47,7 @@ model Business {
   emailEvents      EmailEvent[]
   meetings         Meeting[]
   demos            WebsiteDemo[]
+  commercialMilestones CommercialMilestone[]
 
   @@index([city, state])
   @@index([industry])
@@ -238,6 +240,8 @@ model Outreach {
   status             String             @default("PENDING")
   provider           String?
   providerMessageId  String?
+  gmailMessageId     String?
+  gmailThreadId      String?
   verificationStatus String?
   evidenceUsed       String?
   errorCode          String?
@@ -255,28 +259,39 @@ model Outreach {
   auditLogs          OutreachAuditLog[]
   inboundReplies     InboundReply[]
   emailEvents        EmailEvent[]
+  senderAccountId    String?
+  senderAccount      SenderAccount?     @relation(fields: [senderAccountId], references: [id])
 
   @@index([businessId])
   @@index([campaignId])
   @@index([channel, recipient])
   @@index([status])
+  @@index([senderAccountId])
+  @@index([gmailThreadId])
 }
 
 model Campaign {
-  id            String         @id @default(cuid())
-  name          String
-  description   String?
-  status        String         @default("ACTIVE")
-  scheduleType  String         @default("IMMEDIATE")
-  dailyLimit    Int            @default(50)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  outreaches    Outreach[]
-  campaignLeads CampaignLead[]
-  steps         CampaignStep[]
-  replies       InboundReply[]
-  events        EmailEvent[]
-  meetings      Meeting[]
+  id              String         @id @default(cuid())
+  userId          String?
+  senderAccountId String?
+  name            String
+  description     String?
+  status          String         @default("ACTIVE")
+  scheduleType    String         @default("IMMEDIATE")
+  dailyLimit      Int            @default(50)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  user            User?          @relation(fields: [userId], references: [id])
+  senderAccount   SenderAccount? @relation(fields: [senderAccountId], references: [id])
+  outreaches      Outreach[]
+  campaignLeads   CampaignLead[]
+  steps           CampaignStep[]
+  replies         InboundReply[]
+  events          EmailEvent[]
+  meetings        Meeting[]
+
+  @@index([userId])
+  @@index([senderAccountId])
 }
 
 model SuppressionList {
@@ -510,4 +525,117 @@ model WebsiteDemo {
   @@index([previewSlug])
   @@index([status])
 }
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  name           String?
+  image          String?
+  role           String          @default("USER")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  accounts       Account[]
+  sessions       Session[]
+  senderAccounts SenderAccount[]
+  campaigns      Campaign[]
+
+  @@index([email])
+}
+
+model Account {
+  id                String    @id @default(cuid())
+  userId            String
+  type              String    @default("oauth")
+  provider          String    // "google"
+  providerAccountId String    // Google user ID / sub
+  refreshToken      String?
+  accessToken       String?
+  tokenExpiry       DateTime?
+  scope             String?
+  idToken           String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model SenderAccount {
+  id                String     @id @default(cuid())
+  userId            String
+  provider          String     @default("gmail") // "gmail" | "google_workspace"
+  email             String     // authorized Gmail address
+  displayName       String?
+  providerAccountId String?    // Google user ID / sub
+  accessToken       String
+  refreshToken      String?
+  tokenExpiry       DateTime?
+  scopes            String     // "https://www.googleapis.com/auth/gmail.send ..."
+  status            String     @default("CONNECTED") // "CONNECTED" | "DISCONNECTED" | "EXPIRED" | "REVOKED"
+  lastError         String?
+  lastUsedAt        DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns         Campaign[]
+  outreaches        Outreach[]
+
+  @@unique([userId, email, provider])
+  @@index([userId])
+  @@index([email])
+  @@index([status])
+}
+
+model CommercialMilestone {
+  id                 String   @id @default(cuid())
+  businessId         String
+  milestoneType      String   
+  gmvAmount          Float?
+  gmvCurrency        String?
+  eventDate          String?  
+  dateAccuracy       String?  
+  verificationStatus String   @default("UNVERIFIED") 
+  confidence         Float    @default(0.0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  evidence           CommercialEvidence[]
+
+  @@index([businessId])
+  @@index([milestoneType])
+  @@index([eventDate])
+  @@index([verificationStatus])
+}
+
+model CommercialEvidence {
+  id                  String   @id @default(cuid())
+  milestoneId         String
+  sourceUrl           String
+  sourceTitle         String?
+  sourcePublisher     String?
+  sourcePublishedDate String?
+  evidenceText        String?
+  evidenceContext     String?
+  sourceTier          String?
+  verificationStatus  String   @default("UNVERIFIED")
+  createdAt           DateTime @default(now())
+  
+  milestone           CommercialMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+
+  @@index([milestoneId])
+}
+
 

@@ -48,6 +48,14 @@ const tabTitles: Record<NavTab, { title: string; subtitle: string }> = {
     title: 'Campaigns',
     subtitle: 'Track outreach sequences and client conversions.',
   },
+  'outreach-history': {
+    title: 'Outreach Tracking & Audit',
+    subtitle: 'Review dispatched emails, sender mailbox provenance, and Gmail replies.',
+  },
+  senders: {
+    title: 'Company Sender Mailboxes',
+    subtitle: 'Manage authorized Google Workspace mailboxes, DNS readiness, and safety limits.',
+  },
   settings: {
     title: 'Settings',
     subtitle: 'Manage workspace configuration, scraping rules, and integrations.',
@@ -229,9 +237,14 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="border-t border-[#F1F5F9] pt-1">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setProfileMenuOpen(false);
-                    onShowToast('Signed out', 'Session terminated.', 'info');
+                    try {
+                      await fetch('/api/auth/logout', { method: 'POST' });
+                    } catch {
+                      // ignore error and redirect
+                    }
+                    window.location.href = '/login';
                   }}
                   className="w-full flex items-center gap-2 px-3.5 py-1.5 text-left text-red-600 hover:bg-red-50"
                 >

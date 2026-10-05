@@ -23,7 +23,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
   private getFieldMask(): string {
     return (
       process.env.GOOGLE_PLACES_FIELD_MASK ||
-      'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri,nextPageToken'
+      'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryType,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.rating,places.userRatingCount,places.businessStatus,places.reviews,nextPageToken'
     );
   }
 
@@ -49,13 +49,113 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
   }
 
   /**
+   * Maps Google Places API place representation into canonical RawDiscoveredBusiness.
+   * Real data only: rating, userRatingCount, and authentic reviews.
+   */
+  private mapPlaceToBusiness(p: any, params: SearchDiscoveryParams, mapsUrl: string): RawDiscoveredBusiness {
+    const placeId = p.id;
+    const name = p.displayName?.text || 'Unnamed Business';
+    const address = p.formattedAddress || '';
+    const phone = p.nationalPhoneNumber || p.internationalPhoneNumber;
+    const website = p.websiteUri;
+    const types = p.types || [];
+    const category = p.primaryType || (types.length > 0 ? types[0] : params.industry);
+    const lat = p.location?.latitude;
+    const lon = p.location?.longitude;
+    const rating = typeof p.rating === 'number' ? p.rating : null;
+    const userRatingCount = typeof p.userRatingCount === 'number' ? p.userRatingCount : null;
+    const businessStatus = p.businessStatus || 'OPERATIONAL';
+
+    let reviews: Array<{ authorName?: string; rating: number; text?: string; publishTime?: string }> | undefined = undefined;
+    let positiveReviewDataAvailable = false;
+    let positiveReviewCount: number | null = null;
+    let negativeReviewCount: number | null = null;
+    let neutralReviewCount: number | null = null;
+    let positiveReviewRatio: number | null = null;
+
+    if (Array.isArray(p.reviews) && p.reviews.length > 0) {
+      const mappedReviews: Array<{ authorName?: string; rating: number; text?: string; publishTime?: string }> = p.reviews.map((r: any) => ({
+        authorName: r.authorAttribution?.displayName || undefined,
+        rating: typeof r.rating === 'number' ? r.rating : 5,
+        text: r.originalText?.text || r.text?.text || undefined,
+        publishTime: r.publishTime || undefined,
+      }));
+      reviews = mappedReviews;
+      positiveReviewDataAvailable = true;
+      positiveReviewCount = mappedReviews.filter((r: { rating: number }) => r.rating >= 4).length;
+      negativeReviewCount = mappedReviews.filter((r: { rating: number }) => r.rating <= 2).length;
+      neutralReviewCount = mappedReviews.filter((r: { rating: number }) => r.rating === 3).length;
+      positiveReviewRatio = mappedReviews.length > 0 ? positiveReviewCount / mappedReviews.length : null;
+    }
+
+    return {
+      source: 'google_places',
+      sources: ['google_places'],
+      sourceId: placeId,
+      sourceUrl: mapsUrl,
+      confidence: 'high',
+      name,
+      businessName: name,
+      category,
+      address,
+      city: params.city || params.state,
+      state: params.state,
+      latitude: lat,
+      longitude: lon,
+      phone,
+      website,
+      types,
+      googlePlaceId: placeId,
+      rating,
+      userRatingCount,
+      businessStatus,
+      positiveReviewDataAvailable,
+      positiveReviewCount,
+      negativeReviewCount,
+      neutralReviewCount,
+      positiveReviewRatio,
+      reviews,
+      rawTags: {
+        googlePlaceId: placeId,
+        primaryType: p.primaryType,
+        types,
+        displayName: p.displayName?.text,
+        formattedAddress: p.formattedAddress,
+        googleMapsUri: p.googleMapsUri,
+        location: p.location,
+        nationalPhoneNumber: p.nationalPhoneNumber,
+        internationalPhoneNumber: p.internationalPhoneNumber,
+        websiteUri: p.websiteUri,
+        rating,
+        userRatingCount,
+        businessStatus,
+        reviewsCount: reviews?.length || 0,
+      },
+      sourceEvidence: [
+        {
+          source: 'google_places',
+          sourceId: placeId,
+          sourceUrl: mapsUrl,
+          rawTags: {
+            googlePlaceId: placeId,
+            types,
+            primaryType: p.primaryType,
+            rating,
+            userRatingCount,
+          },
+        },
+      ],
+    };
+  }
+
+  /**
    * Executes official Google Places Text Search (New) as the Primary Discovery Provider.
    * Supports multi-page pagination via nextPageToken up to targetPool limit.
    */
   public async discoverBusinesses(params: SearchDiscoveryParams): Promise<DiscoveryResult> {
     const startTime = Date.now();
     const resolvedArea = params.city ? `${params.city}, ${params.state}` : params.state;
-    const country = 'India'; // LeadPilot is strictly India-only
+    const country = params.country || 'India';
     const queries = getIndustryDiscoveryQueries(params.industry, resolvedArea, country);
 
 
@@ -198,7 +298,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
               if (currentPageToken) {
                 reqPayload.pageToken = currentPageToken;
               }
-              if (params.bbox) {
+              if (params.bbox && (!params.country || params.country === 'India')) {
                 reqPayload.locationRestriction = {
                   rectangle: {
                     low: { latitude: params.bbox.south, longitude: params.bbox.west },
@@ -300,71 +400,22 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
           if (!placeId || seenPlaceIds.has(placeId)) continue;
           seenPlaceIds.add(placeId);
 
-          const name = p.displayName?.text || 'Unnamed Business';
-          const address = p.formattedAddress || '';
-          const phone = p.nationalPhoneNumber || p.internationalPhoneNumber;
-          const website = p.websiteUri;
-          const types = p.types || [];
-          const category = p.primaryType || (types.length > 0 ? types[0] : params.industry);
-          const lat = p.location?.latitude;
-          const lon = p.location?.longitude;
           const mapsUrl = p.googleMapsUri || `https://www.google.com/maps/place/?q=place_id:${placeId}`;
 
           // Cache place in PlaceCache
           googleDiscoveryCache.setPlace({
             placeId,
-            name,
-            address,
-            location: lat && lon ? { latitude: lat, longitude: lon } : undefined,
-            category,
-            phone,
-            websiteUrl: website,
+            name: p.displayName?.text || 'Unnamed Business',
+            address: p.formattedAddress || '',
+            location: p.location?.latitude && p.location?.longitude ? { latitude: p.location.latitude, longitude: p.location.longitude } : undefined,
+            category: p.primaryType || (p.types?.length > 0 ? p.types[0] : params.industry),
+            phone: p.nationalPhoneNumber || p.internationalPhoneNumber,
+            websiteUrl: p.websiteUri,
             lastUpdated: new Date().toISOString(),
             source: 'google_places',
           });
 
-          businesses.push({
-            source: 'google_places',
-            sources: ['google_places'],
-            sourceId: placeId,
-            sourceUrl: mapsUrl,
-            confidence: 'high',
-            name,
-            businessName: name,
-            category,
-            address,
-            city: params.city || params.state,
-            state: params.state,
-            latitude: lat,
-            longitude: lon,
-            phone,
-            website,
-            types,
-            rawTags: {
-              googlePlaceId: placeId,
-              primaryType: p.primaryType,
-              types,
-              displayName: p.displayName?.text,
-              formattedAddress: p.formattedAddress,
-              googleMapsUri: p.googleMapsUri,
-              location: p.location,
-              nationalPhoneNumber: p.nationalPhoneNumber,
-              internationalPhoneNumber: p.internationalPhoneNumber,
-              websiteUri: p.websiteUri,
-            },
-            sourceEvidence: [
-              {
-                source: 'google_places',
-                sourceId: placeId,
-                sourceUrl: mapsUrl,
-                rawTags: {
-                  googlePlaceId: placeId,
-                  types,
-                  primaryType: p.primaryType,
-                },
-              },
-            ],
-          });
+          businesses.push(this.mapPlaceToBusiness(p, params, mapsUrl));
         }
 
         nextPageToken = responseData.nextPageToken;
@@ -398,7 +449,7 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
                   const fetchStart = Date.now();
                   const reqPayload: any = { textQuery: currentQuery, pageSize: 20 };
                   if (currentPageToken) reqPayload.pageToken = currentPageToken;
-                  if (params.bbox) {
+                  if (params.bbox && (!params.country || params.country === 'India')) {
                     reqPayload.locationRestriction = {
                       rectangle: {
                         low: { latitude: params.bbox.south, longitude: params.bbox.west },
@@ -442,40 +493,22 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
               seenPlaceIds.add(placeId);
               addedNew = true;
 
-              const name = p.displayName?.text || 'Unnamed Business';
-              const address = p.formattedAddress || '';
-              const phone = p.nationalPhoneNumber || p.internationalPhoneNumber;
-              const website = p.websiteUri;
-              const types = p.types || [];
-              const category = p.primaryType || (types.length > 0 ? types[0] : params.industry);
-              const lat = p.location?.latitude;
-              const lon = p.location?.longitude;
               const mapsUrl = p.googleMapsUri || `https://www.google.com/maps/place/?q=place_id:${placeId}`;
 
               // Cache place in PlaceCache
               googleDiscoveryCache.setPlace({
-                placeId, name, address, location: lat && lon ? { latitude: lat, longitude: lon } : undefined,
-                category, phone, websiteUrl: website, lastUpdated: new Date().toISOString(), source: 'google_places',
+                placeId,
+                name: p.displayName?.text || 'Unnamed Business',
+                address: p.formattedAddress || '',
+                location: p.location?.latitude && p.location?.longitude ? { latitude: p.location.latitude, longitude: p.location.longitude } : undefined,
+                category: p.primaryType || (p.types?.length > 0 ? p.types[0] : params.industry),
+                phone: p.nationalPhoneNumber || p.internationalPhoneNumber,
+                websiteUrl: p.websiteUri,
+                lastUpdated: new Date().toISOString(),
+                source: 'google_places',
               });
 
-              businesses.push({
-                source: 'google_places',
-                sources: ['google_places'],
-                sourceId: placeId,
-                sourceUrl: mapsUrl,
-                confidence: 'high',
-                name, businessName: name, category, address,
-                city: params.city || params.state, state: params.state,
-                latitude: lat, longitude: lon, phone, website, types,
-                rawTags: {
-                  googlePlaceId: placeId, primaryType: p.primaryType, types,
-                  displayName: p.displayName?.text, formattedAddress: p.formattedAddress,
-                  googleMapsUri: p.googleMapsUri, location: p.location,
-                  nationalPhoneNumber: p.nationalPhoneNumber, internationalPhoneNumber: p.internationalPhoneNumber,
-                  websiteUri: p.websiteUri,
-                },
-                sourceEvidence: [{ source: 'google_places', sourceId: placeId, sourceUrl: mapsUrl, rawTags: { googlePlaceId: placeId, types, primaryType: p.primaryType } }],
-              });
+              businesses.push(this.mapPlaceToBusiness(p, params, mapsUrl));
             }
 
             // Stop paginating this variation early if it yields mostly duplicates
