@@ -475,114 +475,11 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#94A3B8] pointer-events-none" />
             </div>
 
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => setShowReviewFilters(!showReviewFilters)}
-                className="w-full h-9 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-[11.5px] font-medium flex items-center justify-between px-2.5 transition-colors cursor-pointer"
-              >
-                <span className="flex items-center gap-1.5">
-                  <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />
-                  <span>Review Filters</span>
-                </span>
-                {showReviewFilters ? (
-                  <ChevronUp className="h-3.5 w-3.5 text-slate-500" />
-                ) : (
-                  <ChevronDown className="h-3.5 w-3.5 text-slate-500" />
-                )}
-              </button>
-            </div>
+
           </div>
         </div>
 
-        {/* REVIEW INTELLIGENCE PANEL (Sections 8, 9, 10, 11) */}
-        {showReviewFilters && (
-          <div className="p-4 rounded-xl border border-amber-200/80 bg-amber-50/40 space-y-3 animate-fade-in text-[12px]">
-            <div className="flex items-center justify-between border-b border-amber-200/60 pb-2">
-              <span className="font-bold text-[#0F172A] flex items-center gap-2">
-                <Star className="h-4 w-4 text-amber-600 fill-amber-600" />
-                <span>Google Places Review &amp; Rating Intelligence</span>
-              </span>
-              <span className="text-[11px] text-amber-900 font-medium">Real Provider Signals Only</span>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              {/* Minimum Rating */}
-              <div className="space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-700">Minimum Rating</label>
-                <select
-                  value={minRating ?? ''}
-                  onChange={(e) => setMinRating(e.target.value ? Number(e.target.value) : undefined)}
-                  className="w-full h-8 rounded-lg border border-slate-300 bg-white px-2.5 text-[11.5px] text-slate-800 focus:outline-none"
-                >
-                  <option value="">Any Rating</option>
-                  <option value="3.0">★ 3.0 or higher</option>
-                  <option value="3.5">★ 3.5 or higher</option>
-                  <option value="4.0">★ 4.0 or higher</option>
-                  <option value="4.5">★ 4.5 or higher</option>
-                </select>
-              </div>
-
-              {/* Minimum Review Count */}
-              <div className="space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-700">Minimum Reviews</label>
-                <select
-                  value={minReviews ?? ''}
-                  onChange={(e) => setMinReviews(e.target.value ? Number(e.target.value) : undefined)}
-                  className="w-full h-8 rounded-lg border border-slate-300 bg-white px-2.5 text-[11.5px] text-slate-800 focus:outline-none"
-                >
-                  <option value="">Any Review Volume</option>
-                  <option value="10">10+ reviews</option>
-                  <option value="50">50+ reviews</option>
-                  <option value="100">100+ reviews</option>
-                  <option value="500">500+ reviews</option>
-                </select>
-              </div>
-
-              {/* Sort Logic */}
-              <div className="space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-700">Review Sorting</label>
-                <select
-                  value={reviewSort}
-                  onChange={(e) => setReviewSort(e.target.value as ReviewSortOption)}
-                  className="w-full h-8 rounded-lg border border-slate-300 bg-white px-2.5 text-[11.5px] text-slate-800 focus:outline-none"
-                >
-                  <option value="default">Default Pipeline Order</option>
-                  <option value="most_reviews">Most Reviews (Volume)</option>
-                  <option value="highest_rating">Highest Rating</option>
-                  <option value="highest_positive_signal">Highest Positive Signal (Quality + Volume)</option>
-                  <option value="needs_attention">Needs Review Attention (Low Rating/Volume)</option>
-                </select>
-              </div>
-
-              {/* Checkbox Options */}
-              <div className="space-y-2 pt-1 flex flex-col justify-center">
-                <label className="inline-flex items-center gap-2 cursor-pointer text-[11.5px] text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={excludePerfectRating}
-                    onChange={(e) => setExcludePerfectRating(e.target.checked)}
-                    className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-3.5 w-3.5"
-                  />
-                  <span>Exclude Perfect 5.0 Rating</span>
-                </label>
-                <p className="text-[10px] text-slate-500 pl-5.5 -mt-1">
-                  Excludes 5.0 businesses often saturated with few friends/family reviews
-                </p>
-
-                <label className="inline-flex items-center gap-2 cursor-pointer text-[11.5px] text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={requirePositiveReviewEvidence}
-                    onChange={(e) => setRequirePositiveReviewEvidence(e.target.checked)}
-                    className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 h-3.5 w-3.5"
-                  />
-                  <span>Require Verified Review Objects</span>
-                </label>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Primary Action Button Row */}
         <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
