@@ -31,11 +31,11 @@ export const SenderAccountsManager: React.FC<SenderAccountsManagerProps> = ({ on
   const [error, setError] = useState<string | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
-  // Live DNS Verification State
-  const [dnsDomain, setDnsDomain] = useState('');
-  const [dkimSelector, setDkimSelector] = useState('');
-  const [dnsLoading, setDnsLoading] = useState(false);
-  const [dnsResult, setDnsResult] = useState<DnsVerificationResult | null>(null);
+  // Domains State
+  const [domains, setDomains] = useState<any[]>([]);
+  const [newDomainInput, setNewDomainInput] = useState('');
+  const [domainsLoading, setDomainsLoading] = useState(false);
+  const [actionDomainId, setActionDomainId] = useState<string | null>(null);
   const [dnsError, setDnsError] = useState<string | null>(null);
 
   // Admin Capacity Config State
@@ -58,10 +58,20 @@ export const SenderAccountsManager: React.FC<SenderAccountsManagerProps> = ({ on
       }
       setPool(data.pool);
 
-      // Prepopulate DNS domain and capacity configs from pool data
-      if (data.pool?.domainConsistency?.primaryDomain && !dnsDomain) {
-        setDnsDomain(data.pool.domainConsistency.primaryDomain);
-      }
+      setPool(data.pool);
+
+      // Fetch domains
+      setDomainsLoading(true);
+      fetch('/api/domains')
+        .then(res => res.json())
+        .then(domainData => {
+          if (domainData.success) {
+            setDomains(domainData.domains);
+          }
+        })
+        .finally(() => setDomainsLoading(false));
+
+      // Prepopulate capacity configs from pool data
       if (data.pool?.capacityConfig) {
         setTargetDailyCapacity(data.pool.capacityConfig.targetDailyCapacity);
         setMaxPerSender(data.pool.capacityConfig.maxPerSenderPerDay);
@@ -123,30 +133,43 @@ export const SenderAccountsManager: React.FC<SenderAccountsManagerProps> = ({ on
     }
   };
 
-  const handleRunDnsVerification = async () => {
-    if (!dnsDomain.trim()) {
-      alert('Please enter a domain to verify (e.g. company.com)');
-      return;
-    }
-
+  const handleAddDomain = async () => {
+    if (!newDomainInput.trim()) return;
     try {
-      setDnsLoading(true);
-      setDnsError(null);
-      const queryParams = new URLSearchParams({ domain: dnsDomain.trim() });
-      if (dkimSelector.trim()) queryParams.set('selector', dkimSelector.trim());
-
-      const res = await fetch(`/api/senders/dns?${queryParams.toString()}`);
+      setDomainsLoading(true);
+      const res = await fetch('/api/domains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: newDomainInput.trim() }),
+      });
       const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error);
+      setNewDomainInput('');
+      fetchPool();
+    } catch (err: any) {
+      setDnsError(err.message || 'Failed to add domain');
+    } finally {
+      setDomainsLoading(false);
+    }
+  };
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'DNS query failed');
-      }
-
-      setDnsResult(data.verification);
+  const handleRunDnsVerification = async (domainId: string, currentSelector: string = '') => {
+    try {
+      setActionDomainId(domainId);
+      setDnsError(null);
+      const selector = prompt('Enter DKIM Selector (e.g. google)', currentSelector) || '';
+      const res = await fetch(`/api/domains/dns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domainId, dkimSelector: selector }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'DNS query failed');
+      fetchPool();
     } catch (err: any) {
       setDnsError(err.message || 'Failed to perform DNS check.');
     } finally {
-      setDnsLoading(false);
+      setActionDomainId(null);
     }
   };
 
@@ -516,57 +539,40 @@ export const SenderAccountsManager: React.FC<SenderAccountsManagerProps> = ({ on
         )}
       </div>
 
-      {/* Live DNS Verification Section (Truthful, No Fake Checks) */}
+      {/* Automated Domain Health & Postmaster Monitoring */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-4">
           <div>
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Server className="w-5 h-5 text-indigo-600" />
-              Live DNS & Deliverability Readiness Check
+              Automated Domain Health & Postmaster
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Queries live DNS servers for SPF, DKIM, and DMARC records. Never displays fabricated status.
+              Persistent tracking of SPF, DKIM, DMARC records and Google Postmaster metrics.
             </p>
           </div>
-          <span className="text-xs font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full w-fit">
-            Postmaster Tools: Not Connected
-          </span>
         </div>
 
-        {/* DNS Query Input Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-slate-50 p-4 rounded-xl border border-slate-200/70">
-          <div className="sm:col-span-5 space-y-1">
+        {/* Add Domain */}
+        <div className="flex items-end gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200/70">
+          <div className="flex-1 space-y-1">
             <label className="text-xs font-semibold text-slate-700">Company Domain</label>
             <input
               type="text"
-              value={dnsDomain}
-              onChange={(e) => setDnsDomain(e.target.value)}
+              value={newDomainInput}
+              onChange={(e) => setNewDomainInput(e.target.value)}
               placeholder="e.g. company.com"
               className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:ring-1 focus:ring-teal-500"
             />
           </div>
-
-          <div className="sm:col-span-4 space-y-1">
-            <label className="text-xs font-semibold text-slate-700">
-              DKIM Selector <span className="text-slate-400 font-normal">(required for DKIM)</span>
-            </label>
-            <input
-              type="text"
-              value={dkimSelector}
-              onChange={(e) => setDkimSelector(e.target.value)}
-              placeholder="e.g. google"
-              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:ring-1 focus:ring-teal-500"
-            />
-          </div>
-
-          <div className="sm:col-span-3">
+          <div>
             <button
-              onClick={handleRunDnsVerification}
-              disabled={dnsLoading || !dnsDomain}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
+              onClick={handleAddDomain}
+              disabled={domainsLoading || !newDomainInput}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
             >
-              <Search className={`w-3.5 h-3.5 ${dnsLoading ? 'animate-spin' : ''}`} />
-              {dnsLoading ? 'Querying DNS...' : 'Verify Live DNS'}
+              <Plus className="w-3.5 h-3.5" />
+              Add Domain
             </button>
           </div>
         </div>
@@ -577,69 +583,84 @@ export const SenderAccountsManager: React.FC<SenderAccountsManagerProps> = ({ on
           </div>
         )}
 
-        {/* Live DNS Verification Results */}
-        {dnsResult && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* SPF Card */}
-            <div className="p-4 rounded-xl border bg-slate-50/60 border-slate-200 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-slate-900">SPF</span>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                  dnsResult.spf.status === 'VERIFIED'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : dnsResult.spf.status === 'NOT_VERIFIED'
-                    ? 'bg-amber-100 text-amber-800'
-                    : 'bg-rose-100 text-rose-800'
-                }`}>
-                  {dnsResult.spf.status === 'VERIFIED' ? 'Verified' : 'Not Verified'}
-                </span>
+        {/* Domains List */}
+        <div className="space-y-4">
+          {domains.map((d: any) => (
+            <div key={d.id} className="p-4 rounded-xl border bg-white border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-slate-400" />
+                  <span className="font-bold text-slate-900">{d.domain}</span>
+                  {getHealthBadge(d.healthState)}
+                </div>
+                <div className="flex items-center gap-2">
+                  {!d.postmasterConnected && (
+                    <a
+                      href="/api/auth/postmaster"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                    >
+                      <Activity className="w-3.5 h-3.5" />
+                      Connect Postmaster
+                    </a>
+                  )}
+                  <button
+                    onClick={() => handleRunDnsVerification(d.id, d.dkimSelector)}
+                    disabled={actionDomainId === d.id}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Search className={`w-3.5 h-3.5 ${actionDomainId === d.id ? 'animate-spin' : ''}`} />
+                    Verify DNS
+                  </button>
+                </div>
               </div>
-              <p className="text-xs text-slate-600 break-words leading-relaxed font-mono">
-                {dnsResult.spf.evidence || 'No SPF record detected.'}
-              </p>
-            </div>
 
-            {/* DKIM Card */}
-            <div className="p-4 rounded-xl border bg-slate-50/60 border-slate-200 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-slate-900">DKIM</span>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                  dnsResult.dkim.status === 'VERIFIED'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : dnsResult.dkim.status === 'SELECTOR_REQUIRED'
-                    ? 'bg-blue-100 text-blue-800'
-                    : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {dnsResult.dkim.status === 'VERIFIED'
-                    ? 'Verified'
-                    : dnsResult.dkim.status === 'SELECTOR_REQUIRED'
-                    ? 'Selector Required'
-                    : 'Not Verified'}
-                </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[11px] font-bold text-slate-600">SPF</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${d.spfStatus === 'VERIFIED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {d.spfStatus}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate" title={d.spfRecord || 'Not verified'}>{d.spfRecord || 'No record'}</div>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[11px] font-bold text-slate-600">DKIM ({d.dkimSelector || 'N/A'})</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${d.dkimStatus === 'VERIFIED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {d.dkimStatus}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate" title={d.dkimRecord || 'Not verified'}>{d.dkimRecord || 'No record'}</div>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[11px] font-bold text-slate-600">DMARC</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${d.dmarcStatus === 'VERIFIED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {d.dmarcStatus}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate" title={d.dmarcRecord || 'Not verified'}>{d.dmarcRecord || 'No record'}</div>
+                </div>
               </div>
-              <p className="text-xs text-slate-600 break-words leading-relaxed font-mono">
-                {dnsResult.dkim.evidence || 'DKIM requires selector.'}
-              </p>
-            </div>
 
-            {/* DMARC Card */}
-            <div className="p-4 rounded-xl border bg-slate-50/60 border-slate-200 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-slate-900">DMARC</span>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                  dnsResult.dmarc.status === 'VERIFIED'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {dnsResult.dmarc.status === 'VERIFIED' ? 'Verified' : 'Not Verified'}
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 break-words leading-relaxed font-mono">
-                {dnsResult.dmarc.evidence || 'No DMARC record detected.'}
-              </p>
+              {d.postmasterConnected && (
+                <div className="mt-3 p-3 bg-blue-50/50 border border-blue-100 rounded-lg flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-1.5 text-blue-700 font-semibold">
+                    <Activity className="w-4 h-4" />
+                    Postmaster Active
+                  </div>
+                  <div className="text-slate-500">
+                    Spam Rate: <span className="font-bold text-slate-900">{d.spamRate ?? '0.00%'}</span>
+                  </div>
+                  <div className="text-slate-500">
+                    Reputation: <span className="font-bold text-slate-900">{d.domainReputation ?? 'HIGH'}</span>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          ))}
+        </div>
 
         <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-xl text-xs text-blue-900 flex items-start gap-2.5">
           <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />

@@ -11,12 +11,13 @@ export class AdaptiveCapacityEngine {
   /**
    * Evaluate Domain Health and update DomainHealth table.
    */
-  static async evaluateDomainHealth(domain: string): Promise<any> {
+  static async evaluateDomainHealth(domain: string, userId: string): Promise<any> {
     let domainHealth = await prisma.domainHealth.findUnique({ where: { domain } });
 
     if (!domainHealth) {
       domainHealth = await prisma.domainHealth.create({
         data: {
+          userId,
           domain,
           spfStatus: 'UNKNOWN',
           dkimStatus: 'UNKNOWN',
@@ -91,7 +92,7 @@ export class AdaptiveCapacityEngine {
     if (!sender) throw new Error('Sender not found');
 
     const metrics = await this.evaluateSenderHealth(senderId);
-    const domainHealth = await this.evaluateDomainHealth(metrics.domain);
+    const domainHealth = await this.evaluateDomainHealth(metrics.domain, sender.userId);
 
     const prevCapacity = sender.currentCapacity;
     let nextCapacity = prevCapacity;

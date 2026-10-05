@@ -549,6 +549,7 @@ model User {
   sessions       Session[]
   senderAccounts SenderAccount[]
   campaigns      Campaign[]
+  domainHealths  DomainHealth[]
 
   @@index([email])
 }
@@ -676,18 +677,68 @@ model CapacityHistory {
 }
 
 model DomainHealth {
-  id               String    @id @default(cuid())
-  domain           String    @unique
-  parentDomain     String?
-  spfStatus        String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
-  dkimStatus       String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
-  dmarcStatus      String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
-  healthState      String    @default("HEALTHY") // HEALTHY, WARNING, CRITICAL, PAUSED
-  lastEvaluation   DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                   String    @id @default(cuid())
+  userId               String?
+  domain               String    @unique
+  parentDomain         String?
+  
+  // DNS Status
+  spfStatus            String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
+  spfRecord            String?
+  dkimStatus           String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
+  dkimSelector         String?
+  dkimRecord           String?
+  dmarcStatus          String    @default("UNKNOWN") // PASS, FAIL, UNKNOWN
+  dmarcRecord          String?
+  dnsLastCheckedAt     DateTime?
+  
+  // Postmaster Status
+  postmasterConnected  Boolean   @default(false)
+  postmasterVerified   Boolean   @default(false)
+  postmasterLastSyncAt DateTime?
+  postmasterLastError  String?
+  domainReputation     String?
+  spamRate             Float?
+  deliveryErrors       Float?
+  complianceStatus     String?
 
+  // Overall Health
+  healthState          String    @default("HEALTHY") // HEALTHY, WARNING, RESTRICTED, CRITICAL, PAUSED, UNKNOWN
+  lastEvaluation       DateTime?
+  lastAlertAt          DateTime?
+  
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user                 User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snapshots            DomainHealthSnapshot[]
+
+  @@index([userId])
   @@index([healthState])
+}
+
+model DomainHealthSnapshot {
+  id                   String    @id @default(cuid())
+  domainId             String
+  checkedAt            DateTime  @default(now())
+  spfStatus            String
+  dkimStatus           String
+  dmarcStatus          String
+  postmasterAvailable  Boolean   @default(false)
+  domainReputation     String?
+  ipReputation         String?
+  spamRate             Float?
+  deliveryErrors       Float?
+  authenticationStatus String?
+  complianceStatus     String?
+  rawProviderStatus    String?
+  source               String    // DNS, POSTMASTER
+  createdAt            DateTime  @default(now())
+
+  domain               DomainHealth @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+  @@index([checkedAt])
 }
 
 
