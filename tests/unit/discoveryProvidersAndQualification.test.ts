@@ -26,9 +26,13 @@ function createJsonResponse(data: any, status = 200, ok = true) {
 
 describe('P0 Lead Discovery & Qualification Regression Suite', () => {
   const originalApiKey = process.env.GOOGLE_PLACES_API_KEY;
+  const originalGoogleEnabled = process.env.GOOGLE_PLACES_ENABLED;
+  const originalPrimaryProvider = process.env.PRIMARY_DISCOVERY_PROVIDER;
 
   beforeEach(() => {
     process.env.GOOGLE_PLACES_API_KEY = 'AIzaSyDummyTestKeyForUnitTests123456789';
+    process.env.GOOGLE_PLACES_ENABLED = 'true';
+    process.env.PRIMARY_DISCOVERY_PROVIDER = 'google_places';
     GooglePlacesDiscoveryProvider.setSimulateTimeout(false);
     GooglePlacesDiscoveryProvider.setSimulateQuotaExceeded(false);
     GooglePlacesDiscoveryProvider.setSimulateResults(null);
@@ -39,6 +43,8 @@ describe('P0 Lead Discovery & Qualification Regression Suite', () => {
 
   afterEach(() => {
     process.env.GOOGLE_PLACES_API_KEY = originalApiKey;
+    process.env.GOOGLE_PLACES_ENABLED = originalGoogleEnabled;
+    process.env.PRIMARY_DISCOVERY_PROVIDER = originalPrimaryProvider;
     GooglePlacesDiscoveryProvider.setSimulateTimeout(false);
     GooglePlacesDiscoveryProvider.setSimulateQuotaExceeded(false);
     GooglePlacesDiscoveryProvider.setSimulateResults(null);
@@ -468,4 +474,166 @@ describe('P0 Lead Discovery & Qualification Regression Suite', () => {
     const singularTags = getOsmTagsForIndustry('plumber');
     expect(singularTags.some(t => t.key === 'craft' && t.value === 'plumber')).toBe(true);
   });
+
+  // 12. Missing API key returns NOT_CONFIGURED
+  it('12. Missing Google Places API key produces NOT_CONFIGURED status', async () => {
+    const savedKey = process.env.GOOGLE_PLACES_API_KEY;
+    delete process.env.GOOGLE_PLACES_API_KEY;
+    delete process.env.GOOGLE_MAPS_API_KEY;
+
+    try {
+      const res = await googlePlacesDiscoveryProvider.discoverBusinesses({
+        industry: 'Plumbers',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        limit: 10,
+      });
+
+      expect(res.status).toBe('NOT_CONFIGURED');
+      expect(res.statusReason).toContain('GOOGLE_PLACES_NOT_CONFIGURED');
+      expect(res.rawCount).toBe(0);
+    } finally {
+      process.env.GOOGLE_PLACES_API_KEY = savedKey;
+    }
+  });
+
+  // 13. Quoted key sanitization preserves key validity without surrounding quotes
+  it('13. Quoted Google Places key is sanitized and accepted as configured', () => {
+    const savedKey = process.env.GOOGLE_PLACES_API_KEY;
+    process.env.GOOGLE_PLACES_API_KEY = '"AIzaSyDummyQuotedKey12345"';
+
+    try {
+      expect(googlePlacesDiscoveryProvider.isConfigured()).toBe(true);
+    } finally {
+      process.env.GOOGLE_PLACES_API_KEY = savedKey;
+    }
+  });
+
+  // 14. HTTP 400 API_KEY_INVALID produces specific actionable diagnostic
+  it('14. HTTP 400 API_KEY_INVALID produces specific actionable diagnostic', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async (url: any) => {
+      if (String(url).includes('places.googleapis.com')) {
+        return createJsonResponse({
+          error: {
+            code: 400,
+            message: 'API key not valid. Please pass a valid API key.',
+            status: 'INVALID_ARGUMENT',
+            details: [{ reason: 'API_KEY_INVALID' }],
+          },
+        }, 400, false);
+      }
+      return originalFetch(url);
+    };
+
+    try {
+      const res = await googlePlacesDiscoveryProvider.discoverBusinesses({
+        industry: 'Plumbers',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        limit: 10,
+      });
+
+      expect(res.status).toBe('AUTH_FAILED');
+      expect(res.statusReason).toContain('HTTP 400 API_KEY_INVALID');
+      expect(res.statusReason).toContain('extraneous quotes or characters');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  // 15. HTTP 429 quota exhaustion produces RATE_LIMITED status
+  it('15. HTTP 429 quota exhaustion produces RATE_LIMITED status', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async (url: any) => {
+      if (String(url).includes('places.googleapis.com')) {
+        return createJsonResponse({
+          error: {
+            code: 429,
+            message: 'Resource has been exhausted (e.g. check quota).',
+            status: 'RESOURCE_EXHAUSTED',
+          },
+        }, 429, false);
+      }
+      return originalFetch(url);
+    };
+
+    try {
+      const res = await googlePlacesDiscoveryProvider.discoverBusinesses({
+        industry: 'Plumbers',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        limit: 10,
+      });
+
+      expect(res.status).toBe('RATE_LIMITED');
+      expect(res.statusReason).toContain('Google Places rate limited or quota exceeded');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  // 16. Global discovery supports USA and Canada with OSM fallback when Google fails
+  it('16. Global discovery executes seamlessly for USA and Canada when Google encounters AUTH_FAILED', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async (url: any, init?: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes('places.googleapis.com')) {
+        return createJsonResponse({
+          error: { code: 403, message: 'The caller does not have permission' },
+        }, 403, false);
+      }
+      if (urlStr.includes('nominatim')) {
+        return createJsonResponse([
+          {
+            osm_type: 'node',
+            osm_id: 202020,
+            name: 'Redwood Bar and Grill',
+            lat: '34.0522',
+            lon: '-118.2437',
+            address: { city: 'Los Angeles', state: 'California' },
+            extratags: { amenity: 'restaurant', phone: '+1 213 555 0199' },
+          },
+        ]);
+      }
+      if (urlStr.includes('overpass')) {
+        return createJsonResponse({
+          elements: [
+            {
+              type: 'node',
+              id: 202020,
+              lat: 34.0522,
+              lon: -118.2437,
+              tags: {
+                name: 'Redwood Bar and Grill',
+                amenity: 'restaurant',
+                'addr:city': 'Los Angeles',
+                'addr:state': 'California',
+                phone: '+1 213 555 0199',
+              },
+            },
+          ],
+        });
+      }
+      return originalFetch(url, init);
+    };
+
+    try {
+      const discoveryUSA = await providerManager.executeDiscovery({
+        country: 'USA',
+        state: 'California',
+        city: 'Los Angeles',
+        industry: 'Restaurants',
+        limit: 5,
+      });
+
+      expect(discoveryUSA.providers.googlePlaces.status).toBe('AUTH_FAILED');
+      expect(discoveryUSA.providers.osm.status).toBe('PARTIAL');
+      expect(discoveryUSA.totalDiscovered).toBe(1);
+      expect(discoveryUSA.businesses[0].name).toBe('Redwood Bar and Grill');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });
+

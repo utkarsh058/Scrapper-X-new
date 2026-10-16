@@ -233,7 +233,20 @@ export class GooglePlacesNewProvider {
         durationMs: Date.now() - startTime,
       };
     } catch (err: any) {
-      console.warn(`[GooglePlacesNewProvider] Query failed or timed out: ${err.message}`);
+      const errMsg = err.message || '';
+      const isTimeout = err.name === 'AbortError' || errMsg.includes('timeout') || errMsg.includes('timed out');
+      const isAuth = err.status === 401 || err.status === 403 || errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('API key') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('API_KEY_INVALID');
+      const isRate = err.status === 429 || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota') || errMsg.includes('QUOTA');
+      const status: 'AUTH_FAILED' | 'RATE_LIMITED' | 'FAILED' = isAuth ? 'AUTH_FAILED' : isRate ? 'RATE_LIMITED' : 'FAILED';
+      console.warn(`[GooglePlacesNewProvider] Query failed (${status}): ${errMsg}`);
+
+      let authReason = `Google Places API failed: ${errMsg}`;
+      if (errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('caller does not have permission')) {
+        authReason = `Google Places authentication failed (HTTP 403 PERMISSION_DENIED). Action required in Google Cloud Console (Project 896424150645): 1) Ensure 'Places API (New)' is enabled. 2) Ensure an active Cloud Billing account is linked to this project. 3) Under Credentials > API Restrictions, ensure 'Places API (New)' is allowed. 4) Under Application Restrictions, ensure it is set to 'None' (do not use HTTP referrers for server-side calls).`;
+      } else if (errMsg.includes('400') || errMsg.includes('API_KEY_INVALID')) {
+        authReason = `Google Places API key is invalid (HTTP 400 API_KEY_INVALID). Check that GOOGLE_PLACES_API_KEY does not have extraneous quotes or characters.`;
+      }
+
       return {
         providerId: this.providerId,
         providerName: this.name,
@@ -241,9 +254,9 @@ export class GooglePlacesNewProvider {
         rawCount: 0,
         businesses: [],
         sourceComplete: false,
-        status: 'FAILED',
-        statusReason: `Google Places API failed: ${err.message}`,
-        errors: [err.message],
+        status: status as any,
+        statusReason: isAuth ? authReason : isTimeout ? `Google Places query timed out: ${errMsg}` : `Google Places API failed: ${errMsg}`,
+        errors: [errMsg],
         durationMs: Date.now() - startTime,
       };
     } finally {

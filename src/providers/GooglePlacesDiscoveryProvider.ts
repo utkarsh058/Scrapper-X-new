@@ -49,6 +49,10 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
     GooglePlacesDiscoveryProvider.simulateResults = results;
   }
 
+  public static getSimulateResults(): RawDiscoveredBusiness[] | null {
+    return GooglePlacesDiscoveryProvider.simulateResults;
+  }
+
   /**
    * Maps Google Places API place representation into canonical RawDiscoveredBusiness.
    * Real data only: rating, userRatingCount, and authentic reviews.
@@ -214,25 +218,25 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
     // 1. Configuration check (DO NOT silently swallow missing API key!)
     const rawApiKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
     const apiKey = rawApiKey ? rawApiKey.trim().replace(/^["']|["']$/g, '').trim() : '';
-    const isEnabled = process.env.GOOGLE_PLACES_ENABLED !== 'false';
-
-    if (!isEnabled) {
-      return {
-        providerId: this.providerId,
-        providerName: this.name,
-        resolvedAreaName: resolvedArea,
-        rawCount: 0,
-        businesses: [],
-        sourceComplete: false,
-        status: 'DISABLED',
-        statusReason: 'Google Places discovery is disabled via GOOGLE_PLACES_ENABLED=false.',
-        pagesRequested: 0,
-        errors: ['GOOGLE_PLACES_DISABLED'],
-        durationMs: 0,
-      };
-    }
+    const isExplicitlyDisabled = process.env.GOOGLE_PLACES_ENABLED === 'false';
+    const isExplicitlyEnabled = process.env.GOOGLE_PLACES_ENABLED === 'true';
 
     if (!apiKey || apiKey.length === 0) {
+      if (isExplicitlyDisabled) {
+        return {
+          providerId: this.providerId,
+          providerName: this.name,
+          resolvedAreaName: resolvedArea,
+          rawCount: 0,
+          businesses: [],
+          sourceComplete: false,
+          status: 'DISABLED',
+          statusReason: 'Google Places discovery is disabled via GOOGLE_PLACES_ENABLED=false.',
+          pagesRequested: 0,
+          errors: ['GOOGLE_PLACES_DISABLED'],
+          durationMs: 0,
+        };
+      }
       return {
         providerId: this.providerId,
         providerName: this.name,
@@ -244,6 +248,22 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
         statusReason: 'GOOGLE_PLACES_NOT_CONFIGURED: Missing GOOGLE_PLACES_API_KEY.',
         pagesRequested: 0,
         errors: ['GOOGLE_PLACES_NOT_CONFIGURED'],
+        durationMs: 0,
+      };
+    }
+
+    if (!isExplicitlyEnabled) {
+      return {
+        providerId: this.providerId,
+        providerName: this.name,
+        resolvedAreaName: resolvedArea,
+        rawCount: 0,
+        businesses: [],
+        sourceComplete: false,
+        status: 'DISABLED',
+        statusReason: 'Google Places discovery is disabled until explicitly enabled via GOOGLE_PLACES_ENABLED=true.',
+        pagesRequested: 0,
+        errors: ['GOOGLE_PLACES_DISABLED'],
         durationMs: 0,
       };
     }
@@ -558,10 +578,11 @@ export class GooglePlacesDiscoveryProvider implements BusinessDiscoveryProvider 
 
       let authReason = `Google Places authentication failed: ${errMsg}`;
       if (errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('caller does not have permission')) {
-        authReason = `Google Places authentication failed (HTTP 403 PERMISSION_DENIED). Check Google Cloud Console: ensure 'Places API (New)' is enabled, API key restrictions include Places API (New), and billing is active.`;
+        authReason = `Google Places authentication failed (HTTP 403 PERMISSION_DENIED). Action required in Google Cloud Console (Project 896424150645): 1) Ensure 'Places API (New)' is enabled. 2) Ensure an active Cloud Billing account is linked to this project. 3) Under Credentials > API Restrictions, ensure 'Places API (New)' is allowed. 4) Under Application Restrictions, ensure it is set to 'None' (do not use HTTP referrers for server-side calls).`;
       } else if (errMsg.includes('400') || errMsg.includes('API_KEY_INVALID')) {
         authReason = `Google Places API key is invalid (HTTP 400 API_KEY_INVALID). Check that GOOGLE_PLACES_API_KEY does not have extraneous quotes or characters.`;
       }
+
 
       return {
         providerId: this.providerId,

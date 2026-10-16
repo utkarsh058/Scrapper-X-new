@@ -1,4 +1,4 @@
-import { googlePlacesCircuitBreaker, osmCircuitBreaker } from '../resilience/CircuitBreaker';
+import { outscraperCircuitBreaker, googlePlacesCircuitBreaker, osmCircuitBreaker } from '../resilience/CircuitBreaker';
 import { googleUsageTracker } from '../billing/GoogleUsageTracker';
 
 export type ProviderFailureReason =
@@ -18,6 +18,7 @@ export interface ProviderHealth {
 }
 
 export interface SystemProvidersHealth {
+  outscraper: ProviderHealth;
   googlePlaces: ProviderHealth;
   osm: ProviderHealth;
 }
@@ -25,11 +26,54 @@ export interface SystemProvidersHealth {
 export class ProviderHealthService {
   /**
    * Checks the health and readiness of external business discovery providers.
+   * Priority: Outscraper (Primary) -> Google Places (Modular / Disabled until explicitly enabled) -> OSM (Fallback)
    */
   public checkHealth(): SystemProvidersHealth {
+    // 1. Outscraper Health (Primary Discovery Provider)
+    const rawOutscraperKey = process.env.OUTSCRAPER_API_KEY;
+    const outscraperApiKey = rawOutscraperKey ? rawOutscraperKey.trim().replace(/^["']|["']$/g, '').trim() : '';
+    const isOutscraperEnabled = process.env.OUTSCRAPER_ENABLED !== 'false';
+    const isOutscraperConfigured = Boolean(outscraperApiKey && outscraperApiKey.length > 0);
+    const isOutscraperCircuitOpen = outscraperCircuitBreaker.getState() === 'OPEN';
+
+    let outscraperHealth: ProviderHealth;
+
+    if (!isOutscraperEnabled) {
+      outscraperHealth = {
+        enabled: false,
+        configured: isOutscraperConfigured,
+        healthy: false,
+        reason: 'CONFIGURATION_ERROR',
+        message: 'Outscraper provider is explicitly disabled via OUTSCRAPER_ENABLED=false.',
+      };
+    } else if (!isOutscraperConfigured) {
+      outscraperHealth = {
+        enabled: true,
+        configured: false,
+        healthy: false,
+        reason: 'MISSING_API_KEY',
+        message: 'OUTSCRAPER_API_KEY is not configured on the server.',
+      };
+    } else if (isOutscraperCircuitOpen) {
+      outscraperHealth = {
+        enabled: true,
+        configured: true,
+        healthy: false,
+        reason: 'TIMEOUT',
+        message: 'Outscraper circuit breaker is OPEN due to repeated failures or timeouts.',
+      };
+    } else {
+      outscraperHealth = {
+        enabled: true,
+        configured: true,
+        healthy: true,
+      };
+    }
+
+    // 2. Google Places Health (Modular: Disabled until explicitly enabled via GOOGLE_PLACES_ENABLED=true)
     const rawGoogleKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
     const googleApiKey = rawGoogleKey ? rawGoogleKey.trim().replace(/^["']|["']$/g, '').trim() : '';
-    const isGoogleEnabled = process.env.GOOGLE_PLACES_ENABLED !== 'false';
+    const isGoogleEnabled = process.env.GOOGLE_PLACES_ENABLED === 'true';
     const isGoogleConfigured = Boolean(googleApiKey && googleApiKey.length > 0);
     const isGoogleCircuitOpen = googlePlacesCircuitBreaker.getState() === 'OPEN';
     const budgetCheck = googleUsageTracker.canExecuteGoogleRequest();
@@ -42,7 +86,7 @@ export class ProviderHealthService {
         configured: isGoogleConfigured,
         healthy: false,
         reason: 'CONFIGURATION_ERROR',
-        message: 'Google Places provider is explicitly disabled via GOOGLE_PLACES_ENABLED=false.',
+        message: 'Google Places provider is currently disabled. Set GOOGLE_PLACES_ENABLED=true to activate.',
       };
     } else if (!isGoogleConfigured) {
       googleHealth = {
@@ -76,7 +120,7 @@ export class ProviderHealthService {
       };
     }
 
-    // OpenStreetMap Health
+    // 3. OpenStreetMap Health (Secondary / Fallback Provider)
     const isOsmEnabled = process.env.OSM_ENABLED !== 'false';
     const isOsmCircuitOpen = osmCircuitBreaker.getState() === 'OPEN';
 
@@ -107,13 +151,21 @@ export class ProviderHealthService {
     }
 
     return {
+      outscraper: outscraperHealth,
       googlePlaces: googleHealth,
       osm: osmHealth,
     };
   }
 
   /**
-   * Helper to check if Google Places is ready to be used as Primary.
+   * Helper to check if Outscraper is ready to be used as Primary.
+   */
+  public isOutscraperReady(): boolean {
+    return this.checkHealth().outscraper.healthy;
+  }
+
+  /**
+   * Helper to check if Google Places is ready to be used.
    */
   public isGooglePlacesReady(): boolean {
     return this.checkHealth().googlePlaces.healthy;

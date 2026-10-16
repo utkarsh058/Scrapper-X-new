@@ -1,13 +1,11 @@
 import { SearchDiscoveryParams, RawDiscoveredBusiness, DiscoveryResult } from '@/providers/BusinessDiscoveryProvider';
-import { googlePlacesDiscoveryProvider } from '@/providers/GooglePlacesDiscoveryProvider';
+import { outscraperDiscoveryProvider, OutscraperDiscoveryProvider } from '@/providers/OutscraperDiscoveryProvider';
+import { googlePlacesDiscoveryProvider, GooglePlacesDiscoveryProvider } from '@/providers/GooglePlacesDiscoveryProvider';
 import { osmOverpassProvider } from '@/providers/OSMOverpassProvider';
 import { webSearchDiscoveryProvider } from '@/providers/WebSearchDiscoveryProvider';
 import { directoryDiscoveryProvider } from '@/providers/DirectoryDiscoveryProvider';
 import { providerHealthService, SystemProvidersHealth } from './ProviderHealthService';
 import { getTimeoutConfig } from '@/lib/config/concurrencyConfig';
-import { leadPilotDb } from '@/db';
-import { normalizePhone } from '@/utils/phoneUtils';
-import { extractDomain } from '@/utils/urlUtils';
 
 export interface ProviderStatItem {
   status:
@@ -38,14 +36,16 @@ export interface ProviderManagerResult {
   sourceComplete: boolean;
   overallStatus: 'COMPLETE' | 'PARTIAL' | 'NO_RESULTS' | 'PROVIDER_FAILURE' | 'PROVIDER_NOT_CONFIGURED';
   statusReason: string;
-  primaryProvider: 'google_places' | 'osm';
+  primaryProvider: 'outscraper' | 'google_places' | 'osm';
   providers: {
+    outscraper?: ProviderStatItem;
     googlePlaces: ProviderStatItem;
     osm: ProviderStatItem;
     webSearch: ProviderStatItem;
     directory: ProviderStatItem;
   };
   latencies: {
+    outscraperMs?: number;
     googleMs: number;
     osmMs: number;
     webMs: number;
@@ -73,10 +73,11 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, providerNa
 export class ProviderManager {
   /**
    * Orchestrates business discovery:
-   * 1. Google Places (New) as PRIMARY provider with targetPool over-collection.
-   * 2. OpenStreetMap Overpass as SECONDARY / FALLBACK provider.
-   * 3. Public Web Search / Directory as SUPPLEMENTAL providers if needed.
-   * 4. MultiSourceMergeActor executes downstream to merge overlapping candidates.
+   * 1. Outscraper Google Maps Engine as PRIMARY provider (configurable via PRIMARY_DISCOVERY_PROVIDER).
+   * 2. Google Places (New) as MODULAR provider: disabled until explicitly enabled via GOOGLE_PLACES_ENABLED=true.
+   * 3. OpenStreetMap Overpass as SECONDARY / RELIABLE FALLBACK provider.
+   * 4. Public Web Search / Directory as SUPPLEMENTAL providers if needed.
+   * 5. MultiSourceMergeActor executes downstream to merge overlapping candidates.
    */
   public async executeDiscovery(
     params: SearchDiscoveryParams,
@@ -89,20 +90,39 @@ export class ProviderManager {
 
     const health: SystemProvidersHealth = providerHealthService.checkHealth();
 
+    // Determine configured primary provider (default: 'outscraper')
+    const primaryConfig = (process.env.PRIMARY_DISCOVERY_PROVIDER || 'outscraper').toLowerCase().trim();
+    const isOutscraperPrimary = primaryConfig !== 'google_places';
+
     const result: ProviderManagerResult = {
       businesses: [],
       totalDiscovered: 0,
       sourceComplete: false,
       overallStatus: 'NO_RESULTS',
       statusReason: '',
-      primaryProvider: 'google_places',
+      primaryProvider: isOutscraperPrimary ? 'outscraper' : 'google_places',
       providers: {
-        googlePlaces: { status: 'NOT_NEEDED', rawCount: 0, discovered: 0, pagesRequested: 0, durationMs: 0, errors: [] },
+        outscraper: {
+          status: !health.outscraper.enabled ? 'DISABLED' : !health.outscraper.configured ? 'NOT_CONFIGURED' : 'NOT_NEEDED',
+          rawCount: 0,
+          discovered: 0,
+          durationMs: 0,
+          errors: [],
+        },
+        googlePlaces: {
+          status: !health.googlePlaces.enabled ? 'DISABLED' : !health.googlePlaces.configured ? 'NOT_CONFIGURED' : 'NOT_NEEDED',
+          rawCount: 0,
+          discovered: 0,
+          pagesRequested: 0,
+          durationMs: 0,
+          errors: [],
+        },
         osm: { status: 'NOT_NEEDED', rawCount: 0, discovered: 0, durationMs: 0, errors: [] },
         webSearch: { status: 'NOT_NEEDED', rawCount: 0, discovered: 0, durationMs: 0, errors: [] },
         directory: { status: 'NOT_NEEDED', rawCount: 0, discovered: 0, durationMs: 0, errors: [] },
       },
       latencies: {
+        outscraperMs: 0,
         googleMs: 0,
         osmMs: 0,
         webMs: 0,
@@ -111,7 +131,6 @@ export class ProviderManager {
       },
     };
 
-    const isGoogleConfigured = health.googlePlaces.configured && health.googlePlaces.enabled;
     const seenProviderKeys = new Set<string>();
 
     const addCandidate = (b: RawDiscoveredBusiness) => {
@@ -121,89 +140,216 @@ export class ProviderManager {
       result.businesses.push(b);
     };
 
-    // --- STEP 1: GOOGLE PLACES PRIMARY EXECUTION ---
-    if (isGoogleConfigured && health.googlePlaces.healthy) {
-      onProgress?.('Executing Google Places API (New) as Primary discovery provider...');
-      const gStart = Date.now();
-      const timeouts = getTimeoutConfig();
-      // Allow Google Places enough time for up to 3 pages of results from Vercel's servers.
-      // googlePlacesFastMs default is now 8000ms per page; outer timeout must be higher.
-      const googleTimeoutMs = Math.max((timeouts.googlePlacesFastMs || 8000) * 2, 20000);
+    // Helper: Execute Outscraper provider
+    const runOutscraper = async () => {
+      const isOutscraperConfigured = health.outscraper.configured && health.outscraper.enabled;
+      if (isOutscraperConfigured && health.outscraper.healthy) {
+        onProgress?.('Executing Outscraper Google Maps Engine as Primary discovery provider...');
+        const oStart = Date.now();
+        const timeouts = getTimeoutConfig();
+        const outscraperTimeoutMs = Math.max(timeouts.outscraperFastMs || 15000, 15000);
 
-      try {
-        const googleRes = await withTimeout(
-          googlePlacesDiscoveryProvider.discoverBusinesses({ ...params, limit: targetPool }),
-          googleTimeoutMs,
-          'Google Places API'
-        );
-        result.latencies.googleMs = Date.now() - gStart;
-        result.providers.googlePlaces = {
-          status: googleRes.status as any,
-          rawCount: googleRes.rawCount,
-          discovered: googleRes.rawCount,
-          pagesRequested: googleRes.pagesRequested || (googleRes.rawCount > 0 ? 1 : 0),
-          durationMs: result.latencies.googleMs,
-          reason: googleRes.statusReason,
-          errors: googleRes.errors || [],
-        };
-
-        if (googleRes.businesses.length > 0) {
-          for (const b of googleRes.businesses) {
-            addCandidate(b);
-          }
-          onProgress?.(
-            `Google Places discovered ${googleRes.rawCount} venues in ${(result.latencies.googleMs / 1000).toFixed(2)}s`,
-            googleRes.rawCount
+        try {
+          const outscraperRes = await withTimeout(
+            outscraperDiscoveryProvider.discoverBusinesses({ ...params, limit: targetPool }),
+            outscraperTimeoutMs,
+            'Outscraper Google Maps Engine'
           );
+          result.latencies.outscraperMs = Date.now() - oStart;
+          result.providers.outscraper = {
+            status: outscraperRes.status as any,
+            rawCount: outscraperRes.rawCount,
+            discovered: outscraperRes.rawCount,
+            pagesRequested: outscraperRes.pagesRequested || (outscraperRes.rawCount > 0 ? 1 : 0),
+            durationMs: result.latencies.outscraperMs,
+            reason: outscraperRes.statusReason,
+            errors: outscraperRes.errors || [],
+          };
+
+          if (outscraperRes.businesses.length > 0) {
+            for (const b of outscraperRes.businesses) {
+              addCandidate(b);
+            }
+            onProgress?.(
+              `Outscraper discovered ${outscraperRes.rawCount} venues in ${(result.latencies.outscraperMs / 1000).toFixed(2)}s`,
+              outscraperRes.rawCount
+            );
+          }
+        } catch (oErr: any) {
+          result.latencies.outscraperMs = Date.now() - oStart;
+          const errMsg = oErr.message || '';
+          const isAuth = errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('API key') || errMsg.includes('Unauthorized');
+          const isRate = errMsg.includes('429') || errMsg.includes('402') || errMsg.includes('quota') || errMsg.includes('credits');
+          const status = isAuth ? 'AUTH_FAILED' : isRate ? 'RATE_LIMITED' : 'REQUEST_FAILED';
+          result.providers.outscraper = {
+            status: status as any,
+            rawCount: 0,
+            discovered: 0,
+            durationMs: result.latencies.outscraperMs,
+            reason: `Outscraper execution failed: ${errMsg}`,
+            errors: [errMsg],
+          };
+          onProgress?.(`Outscraper encountered an error (${status}): ${errMsg}.`);
         }
-      } catch (gErr: any) {
-        result.latencies.googleMs = Date.now() - gStart;
-        const errMsg = gErr.message || '';
-        const isAuth = errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('API key') || errMsg.includes('PERMISSION_DENIED');
-        const isRate = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED');
-        const status = isAuth ? 'AUTH_FAILED' : isRate ? 'RATE_LIMITED' : 'REQUEST_FAILED';
-        result.providers.googlePlaces = {
-          status: status as any,
+      } else {
+        let disabledStatus: 'DISABLED' | 'NOT_CONFIGURED' | 'PROVIDER_NOT_CONFIGURED' | 'PROVIDER_FAILURE' = 'DISABLED';
+        if (!health.outscraper.enabled) {
+          disabledStatus = 'DISABLED';
+        } else if (!health.outscraper.configured) {
+          disabledStatus = 'NOT_CONFIGURED';
+        } else {
+          disabledStatus = 'PROVIDER_FAILURE';
+        }
+
+        result.providers.outscraper = {
+          status: disabledStatus as any,
           rawCount: 0,
           discovered: 0,
-          pagesRequested: 1,
-          durationMs: result.latencies.googleMs,
-          reason: `Google Places execution failed: ${errMsg}`,
-          errors: [errMsg],
+          durationMs: 0,
+          reason: health.outscraper.message || 'OUTSCRAPER_API_KEY is not configured on the server.',
+          errors: [health.outscraper.reason || 'MISSING_API_KEY'],
         };
-        onProgress?.(`Google Places encountered an error (${status}): ${errMsg}. Continuing with OpenStreetMap fallback...`);
+        onProgress?.(`Outscraper is not active (${health.outscraper.reason || 'NOT_CONFIGURED'}).`);
+      }
+    };
+
+    // Helper: Execute Google Places provider (ONLY IF EXPLICITLY ENABLED)
+    const runGooglePlaces = async () => {
+      const isGoogleConfigured = health.googlePlaces.configured && health.googlePlaces.enabled;
+      if (isGoogleConfigured && health.googlePlaces.healthy) {
+        onProgress?.('Executing Google Places API (New)...');
+        const gStart = Date.now();
+        const timeouts = getTimeoutConfig();
+        const googleTimeoutMs = Math.max((timeouts.googlePlacesFastMs || 8000) * 2, 20000);
+
+        try {
+          const googleRes = await withTimeout(
+            googlePlacesDiscoveryProvider.discoverBusinesses({ ...params, limit: targetPool }),
+            googleTimeoutMs,
+            'Google Places API'
+          );
+          result.latencies.googleMs = Date.now() - gStart;
+          result.providers.googlePlaces = {
+            status: googleRes.status as any,
+            rawCount: googleRes.rawCount,
+            discovered: googleRes.rawCount,
+            pagesRequested: googleRes.pagesRequested || (googleRes.rawCount > 0 ? 1 : 0),
+            durationMs: result.latencies.googleMs,
+            reason: googleRes.statusReason,
+            errors: googleRes.errors || [],
+          };
+
+          if (googleRes.businesses.length > 0) {
+            for (const b of googleRes.businesses) {
+              addCandidate(b);
+            }
+            onProgress?.(
+              `Google Places discovered ${googleRes.rawCount} venues in ${(result.latencies.googleMs / 1000).toFixed(2)}s`,
+              googleRes.rawCount
+            );
+          }
+        } catch (gErr: any) {
+          result.latencies.googleMs = Date.now() - gStart;
+          const errMsg = gErr.message || '';
+          const isAuth = errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('API key') || errMsg.includes('PERMISSION_DENIED');
+          const isRate = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED');
+          const status = isAuth ? 'AUTH_FAILED' : isRate ? 'RATE_LIMITED' : 'REQUEST_FAILED';
+          result.providers.googlePlaces = {
+            status: status as any,
+            rawCount: 0,
+            discovered: 0,
+            pagesRequested: 1,
+            durationMs: result.latencies.googleMs,
+            reason: `Google Places execution failed: ${errMsg}`,
+            errors: [errMsg],
+          };
+          onProgress?.(`Google Places encountered an error (${status}): ${errMsg}.`);
+        }
+      } else {
+        let disabledStatus: 'DISABLED' | 'NOT_CONFIGURED' | 'PROVIDER_NOT_CONFIGURED' | 'PROVIDER_FAILURE' = 'DISABLED';
+        if (!health.googlePlaces.enabled) {
+          disabledStatus = 'DISABLED';
+        } else if (!health.googlePlaces.configured) {
+          disabledStatus = 'NOT_CONFIGURED';
+        } else {
+          disabledStatus = 'PROVIDER_FAILURE';
+        }
+
+        result.providers.googlePlaces = {
+          status: disabledStatus as any,
+          rawCount: 0,
+          discovered: 0,
+          pagesRequested: 0,
+          durationMs: 0,
+          reason: health.googlePlaces.message || 'Google Places is currently disabled. Set GOOGLE_PLACES_ENABLED=true to activate.',
+          errors: [health.googlePlaces.reason || 'GOOGLE_PLACES_DISABLED'],
+        };
+      }
+    };
+
+    // --- STEP 1: EXECUTE PRIMARY DISCOVERY PROVIDER ---
+    if (isOutscraperPrimary) {
+      await runOutscraper();
+
+      // Check if Google Places is explicitly enabled and needed
+      const outscraperFailed = [
+        'FAILED',
+        'DISABLED',
+        'NOT_CONFIGURED',
+        'PROVIDER_NOT_CONFIGURED',
+        'PROVIDER_FAILURE',
+        'AUTH_FAILED',
+        'REQUEST_FAILED',
+        'RATE_LIMITED',
+        'NO_RESULTS',
+      ].includes(result.providers.outscraper?.status || 'DISABLED');
+
+      const needGoogle = (outscraperFailed || result.businesses.length < requestedLimit * 1.5) && (health.googlePlaces.enabled || GooglePlacesDiscoveryProvider.getSimulateResults() !== null);
+      if (needGoogle) {
+        await runGooglePlaces();
       }
     } else {
-      let disabledStatus: 'DISABLED' | 'NOT_CONFIGURED' | 'PROVIDER_NOT_CONFIGURED' | 'PROVIDER_FAILURE' | 'FAILED' = 'DISABLED';
-      if (!health.googlePlaces.enabled) {
-        disabledStatus = 'DISABLED';
-      } else if (!health.googlePlaces.configured) {
-        disabledStatus = 'NOT_CONFIGURED';
-      } else {
-        disabledStatus = 'PROVIDER_FAILURE';
-      }
+      // Configured with Google Places as Primary
+      await runGooglePlaces();
 
-      result.providers.googlePlaces = {
-        status: disabledStatus as any,
-        rawCount: 0,
-        discovered: 0,
-        pagesRequested: 0,
-        durationMs: 0,
-        reason: health.googlePlaces.message || 'GOOGLE_PLACES_API_KEY is not configured on the server.',
-        errors: [health.googlePlaces.reason || 'MISSING_API_KEY'],
-      };
-      onProgress?.(`Google Places is not active (${health.googlePlaces.reason}). Using OpenStreetMap as discovery source...`);
+      const googleFailed = [
+        'FAILED',
+        'DISABLED',
+        'NOT_CONFIGURED',
+        'PROVIDER_NOT_CONFIGURED',
+        'PROVIDER_FAILURE',
+        'AUTH_FAILED',
+        'REQUEST_FAILED',
+        'RATE_LIMITED',
+        'NO_RESULTS',
+      ].includes(result.providers.googlePlaces.status);
+
+      const needOutscraper = (googleFailed || result.businesses.length < requestedLimit * 1.5) && (health.outscraper.configured && health.outscraper.enabled);
+      if (needOutscraper) {
+        await runOutscraper();
+      }
     }
 
     // --- STEP 2: OPENSTREETMAP AS SECONDARY / FALLBACK PROVIDER ---
-    // Section 1 & 7: OSM remains available as fallback and secondary source.
-    // Only invoke OSM if Google failed, returned zero, or returned insufficient candidates
+    // Only invoke OSM if primary / secondary returned insufficient candidates or encountered errors
     const isOsmEnabled = health.osm.configured && health.osm.enabled;
-    const googleFailed = ['FAILED', 'DISABLED', 'NOT_CONFIGURED', 'PROVIDER_NOT_CONFIGURED', 'PROVIDER_FAILURE', 'AUTH_FAILED', 'REQUEST_FAILED', 'RATE_LIMITED', 'NO_RESULTS'].includes(result.providers.googlePlaces.status);
-    const needOsm = googleFailed || result.businesses.length < requestedLimit * 1.5;
+    const primaryStatus = isOutscraperPrimary ? result.providers.outscraper?.status : result.providers.googlePlaces.status;
+    const primaryFailed = [
+      'FAILED',
+      'DISABLED',
+      'NOT_CONFIGURED',
+      'PROVIDER_NOT_CONFIGURED',
+      'PROVIDER_FAILURE',
+      'AUTH_FAILED',
+      'REQUEST_FAILED',
+      'RATE_LIMITED',
+      'NO_RESULTS',
+    ].includes(primaryStatus || 'DISABLED');
+
+    const needOsm = primaryFailed || result.businesses.length < requestedLimit * 1.5;
 
     if (isOsmEnabled && needOsm) {
-      onProgress?.('Executing OpenStreetMap Overpass as Secondary / Fallback discovery source...');
+      onProgress?.('Executing OpenStreetMap Overpass as Fallback discovery source...');
       const oStart = Date.now();
       const osmTimeouts = getTimeoutConfig();
       const osmTimeoutMs = Math.max(osmTimeouts.osmFastMs || 6000, 10000);
@@ -252,7 +398,7 @@ export class ProviderManager {
         rawCount: 0,
         discovered: 0,
         durationMs: 0,
-        reason: 'Google Places provided sufficient candidates; OSM supplemental discovery bypassed for latency.',
+        reason: 'Primary discovery provider provided sufficient candidates; OSM supplemental discovery bypassed for latency.',
         errors: [],
       };
     } else {
@@ -316,34 +462,40 @@ export class ProviderManager {
     result.sourceComplete = result.totalDiscovered > 0;
 
     // --- STEP 4: STRICT SEARCH STATE CLASSIFICATION ---
-    const gStatus = result.providers.googlePlaces.status;
+    const activePrimaryStat = isOutscraperPrimary ? result.providers.outscraper : result.providers.googlePlaces;
+    const pStatus = activePrimaryStat?.status || 'DISABLED';
     const oStatus = result.providers.osm.status;
 
     if (result.totalDiscovered > 0) {
       result.overallStatus = result.totalDiscovered >= requestedLimit ? 'COMPLETE' : 'PARTIAL';
-      result.statusReason = `Discovered ${result.totalDiscovered} candidates (Google Places: ${result.providers.googlePlaces.rawCount}, OSM: ${result.providers.osm.rawCount}, Web: ${result.providers.webSearch.rawCount}).`;
+      const breakdown = [
+        result.providers.outscraper?.rawCount ? `Outscraper: ${result.providers.outscraper.rawCount}` : null,
+        result.providers.googlePlaces.rawCount ? `Google Places: ${result.providers.googlePlaces.rawCount}` : null,
+        result.providers.osm.rawCount ? `OSM: ${result.providers.osm.rawCount}` : null,
+        result.providers.webSearch?.rawCount ? `Web: ${result.providers.webSearch.rawCount}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      result.statusReason = `Discovered ${result.totalDiscovered} candidates (${breakdown || 'verified'}).`;
     } else {
-      const gFailed = ['FAILED', 'PROVIDER_FAILURE', 'AUTH_FAILED', 'RATE_LIMITED', 'REQUEST_FAILED'].includes(gStatus);
+      const pFailed = ['FAILED', 'PROVIDER_FAILURE', 'AUTH_FAILED', 'RATE_LIMITED', 'REQUEST_FAILED'].includes(pStatus);
       const oFailed = ['FAILED', 'PROVIDER_FAILURE', 'RATE_LIMITED', 'REQUEST_FAILED'].includes(oStatus);
 
-      if (gFailed && oFailed) {
+      if (pFailed && oFailed) {
         result.overallStatus = 'PROVIDER_FAILURE';
-        result.statusReason = `All business discovery providers encountered errors (Google Places: ${gStatus}, OSM: ${oStatus}).`;
+        result.statusReason = `All business discovery providers encountered errors (${isOutscraperPrimary ? 'Outscraper' : 'Google Places'}: ${pStatus}, OSM: ${oStatus}).`;
       } else if (
-        (gStatus === 'DISABLED' || gStatus === 'NOT_CONFIGURED' || gStatus === 'PROVIDER_NOT_CONFIGURED') &&
+        (pStatus === 'DISABLED' || pStatus === 'NOT_CONFIGURED' || pStatus === 'PROVIDER_NOT_CONFIGURED') &&
         oFailed
       ) {
         result.overallStatus = 'PROVIDER_FAILURE';
-        result.statusReason = `Google Places is not configured and OpenStreetMap fallback failed (${oStatus}).`;
+        result.statusReason = `${isOutscraperPrimary ? 'Outscraper' : 'Google Places'} is not configured and OpenStreetMap fallback failed (${oStatus}).`;
       } else if (
-        (gStatus === 'DISABLED' || gStatus === 'NOT_CONFIGURED' || gStatus === 'PROVIDER_NOT_CONFIGURED') &&
+        (pStatus === 'DISABLED' || pStatus === 'NOT_CONFIGURED' || pStatus === 'PROVIDER_NOT_CONFIGURED') &&
         oStatus === 'DISABLED'
       ) {
         result.overallStatus = 'PROVIDER_NOT_CONFIGURED';
         result.statusReason = 'No business discovery providers are configured on the server.';
-      } else if (gStatus === 'AUTH_FAILED' && oStatus === 'NO_RESULTS') {
-        result.overallStatus = 'NO_RESULTS';
-        result.statusReason = `Google Places authentication failed (HTTP 403). OpenStreetMap searched successfully but found zero business records for ${params.industry} in ${params.city || params.state}.`;
       } else {
         result.overallStatus = 'NO_RESULTS';
         result.statusReason = `No business records found for ${params.industry} in ${params.city || params.state}.`;

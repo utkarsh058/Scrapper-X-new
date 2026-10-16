@@ -147,6 +147,7 @@ export interface SearchDiagnostics {
 }
 
 export interface ProviderStats {
+  outscraper?: { rawCount: number; status: string; durationMs: number; errors?: string[] };
   googlePlaces?: { rawCount: number; status: string; durationMs: number; errors?: string[] };
   osm: { rawCount: number; status: string; durationMs: number; errors?: string[] };
   web: { rawCount: number; status: string; durationMs: number; errors?: string[] };

@@ -35,6 +35,7 @@ export interface BusinessDiscoveryOutput {
   queryUsed?: string;
   endpointUsed?: string;
   providerStats: {
+    outscraper?: ProviderStat;
     osm: ProviderStat;
     googlePlaces?: ProviderStat;
     web: ProviderStat;
@@ -43,6 +44,7 @@ export interface BusinessDiscoveryOutput {
     directory: ProviderStat;
   };
   totalDiscovered: number;
+  outscraperLatencyMs?: number;
   googleLatencyMs?: number;
   osmLatencyMs?: number;
   cacheHit?: boolean;
@@ -97,10 +99,13 @@ export class BusinessDiscoveryActor extends BaseActor<SearchDiscoveryParams, Bus
     const managerResult = await providerManager.executeDiscovery(params, context.onProgress);
 
     const activeSources: string[] = [];
+    if (managerResult.providers.outscraper?.rawCount && managerResult.providers.outscraper.rawCount > 0) activeSources.push('Outscraper');
     if (managerResult.providers.googlePlaces.rawCount > 0) activeSources.push('Google Places API');
     if (managerResult.providers.osm.rawCount > 0) activeSources.push('OpenStreetMap');
     if (activeSources.length === 0) {
-      activeSources.push(managerResult.primaryProvider === 'google_places' ? 'Google Places API' : 'OpenStreetMap');
+      if (managerResult.primaryProvider === 'outscraper') activeSources.push('Outscraper');
+      else if (managerResult.primaryProvider === 'google_places') activeSources.push('Google Places API');
+      else activeSources.push('OpenStreetMap');
     }
 
     const dummyStat = (status: 'DISABLED' | 'NOT_NEEDED'): ProviderStat => ({
@@ -110,6 +115,15 @@ export class BusinessDiscoveryActor extends BaseActor<SearchDiscoveryParams, Bus
       durationMs: 0,
       errors: [],
     });
+
+    const outStat: ProviderStat = {
+      rawCount: managerResult.providers.outscraper?.rawCount || 0,
+      discovered: managerResult.providers.outscraper?.rawCount || 0,
+      status: (managerResult.providers.outscraper?.status || 'NOT_NEEDED') as any,
+      durationMs: managerResult.latencies.outscraperMs || 0,
+      reason: managerResult.providers.outscraper?.reason,
+      errors: managerResult.providers.outscraper?.errors,
+    };
 
     const gStat: ProviderStat = {
       rawCount: managerResult.providers.googlePlaces.rawCount,
@@ -155,12 +169,14 @@ export class BusinessDiscoveryActor extends BaseActor<SearchDiscoveryParams, Bus
       sourceStatus: managerResult.overallStatus,
       statusReason: managerResult.statusReason,
       queryUsed: params.industry,
+      outscraperLatencyMs: managerResult.latencies.outscraperMs,
       googleLatencyMs: managerResult.latencies.googleMs,
       osmLatencyMs: managerResult.latencies.osmMs,
       providerStats: {
+        outscraper: outStat,
         googlePlaces: gStat,
         osm: oStat,
-        businessProvider: gStat,
+        businessProvider: managerResult.primaryProvider === 'outscraper' ? outStat : gStat,
         web: wStat,
         webSearch: wStat,
         directory: dStat,
@@ -177,7 +193,7 @@ export class BusinessDiscoveryActor extends BaseActor<SearchDiscoveryParams, Bus
     return {
       data: output,
       sources: activeSources,
-      warnings: managerResult.providers.googlePlaces.errors,
+      warnings: managerResult.providers.outscraper?.errors || managerResult.providers.googlePlaces.errors,
     };
   }
 }

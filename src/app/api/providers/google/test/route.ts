@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const query = searchParams.get('query') || 'restaurants in Noida, Uttar Pradesh, India';
 
   const apiKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
-  const isEnabled = process.env.GOOGLE_PLACES_ENABLED !== 'false';
+  const isEnabled = process.env.GOOGLE_PLACES_ENABLED === 'true';
   const isConfigured = Boolean(apiKey && apiKey.trim().length > 0);
 
   if (!isEnabled) {
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
       configured: isConfigured,
       reachable: false,
       status: 'DISABLED',
-      error: 'Google Places provider is explicitly disabled via GOOGLE_PLACES_ENABLED=false.',
+      error: 'Google Places provider is currently disabled. Set GOOGLE_PLACES_ENABLED=true to activate.',
       testedAt: new Date().toISOString(),
     }, { status: 200 });
   }
