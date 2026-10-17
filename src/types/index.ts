@@ -390,7 +390,8 @@ export type NavTab =
   | 'outreach-history'
   | 'senders'
   | 'settings' 
-  | 'help';
+  | 'help'
+  | 'enrich';
 
 export interface ToastMessage {
   id: string;
