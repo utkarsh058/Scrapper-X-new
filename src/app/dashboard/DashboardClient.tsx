@@ -46,6 +46,7 @@ export default function DashboardClient() {
   const [statusReason, setStatusReason] = useState<string | null>(null);
   const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [leadDetailTab, setLeadDetailTab] = useState<'overview' | 'enrichment'>('overview');
   const [auditTargetLead, setAuditTargetLead] = useState<Lead | null>(null);
 
   // Load real persisted leads on initial mount
@@ -60,6 +61,16 @@ export default function DashboardClient() {
       })
       .catch(() => {});
   }, []);
+
+  const handleSelectLead = (lead: Lead) => {
+    setSelectedLead(lead);
+    setLeadDetailTab('overview');
+  };
+
+  const handleEnrichLead = (lead: Lead) => {
+    setSelectedLead(lead);
+    setLeadDetailTab('enrichment');
+  };
 
 
   // Modals & Panels state
@@ -394,7 +405,8 @@ export default function DashboardClient() {
                 rejectionReasons={rejectionReasons}
                 statusReason={statusReason}
                 errorMessage={searchErrorMessage}
-                onSelectLead={setSelectedLead}
+                onSelectLead={handleSelectLead}
+                onEnrichLead={handleEnrichLead}
                 onQuickAudit={handleOpenQuickAudit}
                 onOpenExportModal={handleOpenExport}
                 onShowToast={addToast}
@@ -427,7 +439,8 @@ export default function DashboardClient() {
                 rejectionReasons={rejectionReasons}
                 statusReason={statusReason}
                 errorMessage={searchErrorMessage}
-                onSelectLead={setSelectedLead}
+                onSelectLead={handleSelectLead}
+                onEnrichLead={handleEnrichLead}
                 onQuickAudit={handleOpenQuickAudit}
                 onOpenExportModal={handleOpenExport}
                 onShowToast={addToast}
@@ -496,6 +509,7 @@ export default function DashboardClient() {
       {/* 7. Slide-over Lead Detail Drawer */}
       <LeadDetailDrawer
         lead={selectedLead}
+        initialTab={leadDetailTab}
         onClose={() => setSelectedLead(null)}
         onQuickAudit={handleOpenQuickAudit}
         onShowToast={addToast}
