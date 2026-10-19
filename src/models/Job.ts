@@ -103,6 +103,8 @@ export interface Job {
   criteria: SearchRequestPayload;
   requestedLeads: number;
   highNetWorthFilter?: boolean;
+  highNetWorthOnly?: boolean;
+  nextOffset?: number;
 
   // Pipeline counters
   discovered: number;

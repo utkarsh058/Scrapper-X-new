@@ -51,11 +51,14 @@ interface LeadsTableProps {
   statusReason?: string | null;
   errorMessage?: string | null;
   onSelectLead: (lead: Lead) => void;
+  onEnrichLead?: (lead: Lead) => void;
   onQuickAudit?: (lead: Lead) => void;
   onOpenExportModal?: (selectedLeads: Lead[]) => void;
   onShowToast: (title: string, desc?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
   hasSearched?: boolean;
   isSearching?: boolean;
+  onLoadMore?: () => void;
+  currentOffset?: number;
 }
 
 export const LeadsTable: React.FC<LeadsTableProps> = ({
@@ -71,9 +74,14 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
   statusReason,
   errorMessage,
   onSelectLead,
+  onEnrichLead,
+  onQuickAudit,
+  onOpenExportModal,
   onShowToast,
   hasSearched = false,
   isSearching = false,
+  onLoadMore,
+  currentOffset = 0,
 }) => {
   // In-results search query (filters within returned real records)
   const [searchQuery, setSearchQuery] = useState('');
@@ -538,7 +546,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
             {/* Concise explanation when fewer leads qualified */}
             {leads.length < requestedLimit && (
               <span className="text-slate-400 italic text-[11.5px]">
-                ({leads.length === 0 ? 'No businesses matched your specific filters in this area.' : `${leads.length} verified ${leads.length === 1 ? 'business' : 'businesses'} qualified in this area.`})
+                ({statusReason || `Found ${leads.length} verified leads. Searched thoroughly but could not find ${requestedLimit - leads.length} more in this area. Try a broader location.`})
               </span>
             )}
 
@@ -565,9 +573,9 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
             )}
 
             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ${
-              searchStatus === 'COMPLETE' ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+              (searchStatus === 'COMPLETE' || leads.length >= requestedLimit) ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
             }`}>
-              Status: {searchStatus || 'COMPLETE'}
+              Status: {(leads.length >= requestedLimit && searchStatus !== 'FAILED') ? 'COMPLETE' : (searchStatus || 'COMPLETE')}
             </span>
           </div>
         </div>
@@ -824,7 +832,11 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 text-[11.5px]">
                 <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
-                  <div className="text-[#64748B] text-[10.5px]">Raw Discovered</div>
+                  <div className="text-[#64748B] text-[10.5px]">API Requests</div>
+                  <div className="text-[15px] font-bold text-indigo-700">{pipelineBreakdown?.apiRequestsCount ?? 1}</div>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
+                  <div className="text-[#64748B] text-[10.5px]">Candidates Discovered</div>
                   <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.rawDiscoveredCount ?? pipelineStats?.rawOsmCount ?? 0}</div>
                 </div>
                 <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
@@ -836,7 +848,7 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                   <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.locationVerifiedCount ?? pipelineBreakdown?.inCityBoundsCount ?? pipelineStats?.inCityBoundsCount ?? 0}</div>
                 </div>
                 <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
-                  <div className="text-[#64748B] text-[10.5px]">Deduplicated</div>
+                  <div className="text-[#64748B] text-[10.5px]">Candidates Merged</div>
                   <div className="text-[15px] font-bold text-[#0F172A]">{pipelineBreakdown?.deduplicatedCount ?? pipelineStats?.deduplicatedCount ?? 0}</div>
                 </div>
                 <div className="bg-white p-2.5 rounded-lg border border-[#E2E8F0]">
@@ -863,9 +875,9 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
                   <div className="text-[#64748B] text-[10.5px]">Website Unreachable</div>
                   <div className="text-[15px] font-bold text-amber-700">{pipelineBreakdown?.websiteUnreachableCount ?? 0}</div>
                 </div>
-                <div className="bg-white p-2.5 rounded-lg border border-teal-200 col-span-2 sm:col-span-1">
-                  <div className="text-teal-700 text-[10.5px] font-semibold">Final Qualified</div>
-                  <div className="text-[15px] font-bold text-teal-800">{pipelineBreakdown?.finalQualifiedCount ?? leads.length}</div>
+                <div className="bg-white p-2.5 rounded-lg border border-teal-200">
+                  <div className="text-teal-700 text-[10.5px] font-semibold">Leads Delivered</div>
+                  <div className="text-[15px] font-bold text-teal-800">{pipelineBreakdown?.deliveredCount ?? leads.length}</div>
                 </div>
               </div>
             </div>
@@ -1012,10 +1024,12 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
         {/* State E: Results Table (Section 9 Columns) */}
         {hasSearched && !isSearching && leads.length > 0 && (
           <div className="overflow-x-auto">
-            {statusReason && statusReason.includes('₹70 Cr') && (
-              <div className="px-5 py-2.5 bg-violet-50 border-b border-violet-100 flex items-center justify-between text-[12.5px] text-violet-900 font-medium">
+            {statusReason && (
+              <div className={`px-5 py-2.5 border-b flex items-center justify-between text-[12.5px] font-medium ${
+                leads.length >= requestedLimit ? 'bg-teal-50 border-teal-100 text-teal-900' : 'bg-amber-50 border-amber-100 text-amber-900'
+              }`}>
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-violet-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 shrink-0 ${leads.length >= requestedLimit ? 'text-teal-600' : 'text-amber-600'}`} />
                   <span>{statusReason}</span>
                 </div>
               </div>
@@ -1351,15 +1365,32 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
 
                     {/* 10. Actions */}
                     <td className="px-4 py-3.5 align-top text-right whitespace-nowrap">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectLead(lead);
-                        }}
-                        className="inline-flex items-center justify-center h-8.5 min-h-[34px] px-3.5 rounded-xl border border-[#CBD5E1] bg-white text-[12px] font-medium text-[#0F172A] hover:bg-[#0F172A] hover:text-white transition-all btn-pressable shadow-2xs cursor-pointer"
-                      >
-                        View
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onEnrichLead) {
+                              onEnrichLead(lead);
+                            } else {
+                              onSelectLead(lead);
+                            }
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 h-8.5 min-h-[34px] px-2.5 rounded-xl border border-teal-300 bg-teal-50 text-[12px] font-semibold text-teal-800 hover:bg-teal-700 hover:text-white transition-all btn-pressable shadow-2xs cursor-pointer group"
+                          title="Enrich Lead Contact (Work email, Personal email, Phone)"
+                        >
+                          <Wand2 className="h-3.5 w-3.5 text-teal-600 group-hover:text-white transition-colors" />
+                          <span>Enrich</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectLead(lead);
+                          }}
+                          className="inline-flex items-center justify-center h-8.5 min-h-[34px] px-3.5 rounded-xl border border-[#CBD5E1] bg-white text-[12px] font-medium text-[#0F172A] hover:bg-[#0F172A] hover:text-white transition-all btn-pressable shadow-2xs cursor-pointer"
+                        >
+                          View
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1384,27 +1415,41 @@ export const LeadsTable: React.FC<LeadsTableProps> = ({
             </span>
           </div>
 
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-3">
+            {onLoadMore && (
               <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="px-2.5 py-1 rounded-lg border border-[#CBD5E1] bg-white text-[12px] text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC] transition-colors cursor-pointer"
+                onClick={onLoadMore}
+                disabled={isSearching}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-teal-300 bg-teal-50 text-[12px] font-semibold text-teal-800 hover:bg-teal-100 transition-all btn-pressable shadow-2xs cursor-pointer disabled:opacity-50"
+                title="Find next batch of new leads for the same search criteria"
               >
-                Previous
+                <Sparkles className="h-3.5 w-3.5 text-teal-600" />
+                <span>Find Next Batch</span>
               </button>
-              <span className="px-2 text-[#0F172A] font-semibold">
-                {currentPage} / {totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="px-2.5 py-1 rounded-lg border border-[#CBD5E1] bg-white text-[12px] text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC] transition-colors cursor-pointer"
-              >
-                Next
-              </button>
-            </div>
-          )}
+            )}
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1 rounded-lg border border-[#CBD5E1] bg-white text-[12px] text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC] transition-colors cursor-pointer"
+                >
+                  Previous
+                </button>
+                <span className="px-2 text-[#0F172A] font-semibold">
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1 rounded-lg border border-[#CBD5E1] bg-white text-[12px] text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC] transition-colors cursor-pointer"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

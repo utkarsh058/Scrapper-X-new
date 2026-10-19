@@ -33,6 +33,8 @@ export interface LeadFilterCriteria {
   contact: ContactFilter;
   website: WebsiteFilter;
   limit: NumberOfLeads;
+  offset?: number;
+  page?: number;
   minRating?: number;
   minReviews?: number;
   excludePerfectRating?: boolean;
@@ -46,9 +48,10 @@ interface LeadSearchCardProps {
   initialCriteria?: Partial<LeadFilterCriteria>;
   isSearchingExternal?: boolean;
   liveProgressLog?: { actorId: string; stepName: string; message: string; count?: number; timestamp: string }[];
-  onSearchStart?: () => void;
+  onSearchStart?: (isSubsequentBatch?: boolean) => void;
   onSearchSubmit?: (criteria: LeadFilterCriteria) => void;
   onViewLeads?: () => void;
+  currentOffset?: number;
 }
 
 export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
@@ -58,7 +61,18 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
   onSearchStart,
   onSearchSubmit,
   onViewLeads,
+  currentOffset: propOffset,
 }) => {
+  // Offset tracking for sequential pagination
+  const [currentOffset, setCurrentOffset] = useState<number>(propOffset ?? initialCriteria?.offset ?? 0);
+  const lastCriteriaKeyRef = React.useRef<string>('');
+
+  React.useEffect(() => {
+    if (typeof propOffset === 'number') {
+      setCurrentOffset(propOffset);
+    }
+  }, [propOffset]);
+
   // 1. COUNTRY: USA, Canada, India
   const [selectedCountry, setSelectedCountry] = useState<'India' | 'USA' | 'Canada'>(
     (initialCriteria?.country as any) || 'USA'
@@ -85,8 +99,8 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
   const [contact, setContact] = useState<ContactFilter>(initialCriteria?.contact || 'All Contacts');
   const [website, setWebsite] = useState<WebsiteFilter>(initialCriteria?.website || 'All Websites');
 
-  // 6. RESULTS LIMIT: Dropdown (Default 10, Selectable: 5, 10, 15, 20)
-  const [limit, setLimit] = useState<NumberOfLeads>(initialCriteria?.limit || 10);
+  // 6. RESULTS LIMIT: Dropdown (Default 5, Selectable: 5, 10, 15, 20)
+  const [limit, setLimit] = useState<NumberOfLeads>(initialCriteria?.limit || 5);
 
   // 7. REVIEW INTELLIGENCE FILTERS (Sections 9, 10, 11)
   const [showReviewFilters, setShowReviewFilters] = useState(false);
@@ -213,21 +227,25 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
 
   const limitOptions: NumberOfLeads[] = [5, 10, 15, 20];
 
-  const isSearching = jobState === 'running' || isSearchingExternal;
+  const isSearching = isSearchingExternal;
 
   const handleStartSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (isSearching) return;
 
-    setJobState('running');
-    setCurrentStepIndex(0);
-    if (onSearchStart) {
-      onSearchStart();
-    }
-
     const isAllCities =
       activeCity.toLowerCase().startsWith('all cities') ||
       activeCity.toLowerCase().includes('all cities in');
+
+    const currentKey = `${selectedCountry}:${selectedState}:${isAllCities ? '' : activeCity}:${activeIndustry}:${contact}:${website}:${limit}:${Boolean(highNetWorthFilter)}`;
+    const isSameCriteria = lastCriteriaKeyRef.current === currentKey;
+    const nextOffset = isSameCriteria ? currentOffset : 0;
+
+    if (onSearchStart) {
+      onSearchStart(nextOffset > 0);
+    }
+
+    lastCriteriaKeyRef.current = currentKey;
 
     const criteria: LeadFilterCriteria = {
       country: selectedCountry,
@@ -237,6 +255,8 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
       contact,
       website,
       limit,
+      offset: nextOffset,
+      page: Math.floor(nextOffset / Number(limit)) + 1,
       minRating,
       minReviews,
       excludePerfectRating,
@@ -246,19 +266,9 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
       financialFilterMode: 'STRICT_NET_WORTH',
     };
 
-    setTimeout(() => setCurrentStepIndex(1), 500);
-    setTimeout(() => setCurrentStepIndex(2), 1100);
-    setTimeout(() => setCurrentStepIndex(3), 1800);
-    setTimeout(() => setCurrentStepIndex(4), 2500);
-    setTimeout(() => {
-      setJobState('completed');
-      if (onSearchSubmit) {
-        onSearchSubmit(criteria);
-      }
-      if (onViewLeads) {
-        onViewLeads();
-      }
-    }, 2900);
+    if (onSearchSubmit) {
+      onSearchSubmit(criteria);
+    }
   };
 
   return (
@@ -575,7 +585,13 @@ export const LeadSearchCard: React.FC<LeadSearchCardProps> = ({
               </>
             ) : (
               <>
-                <span>Find Leads</span>
+                <span>
+                  {lastCriteriaKeyRef.current &&
+                  lastCriteriaKeyRef.current === `${selectedCountry}:${selectedState}:${activeCity.toLowerCase().startsWith('all cities') || activeCity.toLowerCase().includes('all cities in') ? '' : activeCity}:${activeIndustry}:${contact}:${website}:${limit}:${Boolean(highNetWorthFilter)}` &&
+                  currentOffset > 0
+                    ? `Find Next Batch (+${limit})`
+                    : 'Find Leads'}
+                </span>
                 <ArrowRight className="h-4 w-4 text-teal-400" />
               </>
             )}

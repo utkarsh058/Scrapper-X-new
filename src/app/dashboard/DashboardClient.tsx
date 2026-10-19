@@ -46,20 +46,20 @@ export default function DashboardClient() {
   const [statusReason, setStatusReason] = useState<string | null>(null);
   const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [leadDetailTab, setLeadDetailTab] = useState<'overview' | 'enrichment'>('overview');
   const [auditTargetLead, setAuditTargetLead] = useState<Lead | null>(null);
 
-  // Load real persisted leads on initial mount
-  React.useEffect(() => {
-    fetch('/api/leads?limit=100')
-      .then((res) => parseApiResponse(res, '/api/leads?limit=100'))
-      .then((data) => {
-        if (data.success && Array.isArray(data.leads) && data.leads.length > 0) {
-          setLeads(data.leads);
-          setHasSearched(true);
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const handleSelectLead = (lead: Lead) => {
+    setSelectedLead(lead);
+    setLeadDetailTab('overview');
+  };
+
+  const handleEnrichLead = (lead: Lead) => {
+    setSelectedLead(lead);
+    setLeadDetailTab('enrichment');
+  };
+
+
 
 
   // Modals & Panels state
@@ -74,6 +74,8 @@ export default function DashboardClient() {
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [liveProgressLog, setLiveProgressLog] = useState<any[]>([]);
+  const [lastSearchCriteria, setLastSearchCriteria] = useState<LeadFilterCriteria | null>(null);
+  const [currentSearchOffset, setCurrentSearchOffset] = useState<number>(0);
 
   // Toasts state
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -118,14 +120,41 @@ export default function DashboardClient() {
     setIsExportModalOpen(true);
   };
 
-  const handleLeadSearchStart = () => {
+  const handleLeadSearchStart = (isSubsequentBatch?: boolean) => {
     setIsSearching(true);
+    setHasSearched(true);
+    if (!isSubsequentBatch) {
+      setLeads([]);
+      setSearchSummary(null);
+      setSearchStatus(null);
+      setPipelineStats(null);
+      setProviderStats(null);
+      setPipelineBreakdown(null);
+      setRotationStats(null);
+      setRejectedCandidates([]);
+      setRejectionReasons(null);
+    }
+    setStatusReason(null);
     setSearchErrorMessage(null);
     setLiveProgressLog([]);
   };
 
   const handleLeadSearchSubmit = async (criteria: LeadFilterCriteria) => {
+    const isSubsequentBatch = (criteria.offset ?? 0) > 0;
+    setLastSearchCriteria(criteria);
+    setCurrentSearchOffset(criteria.offset ?? 0);
+
     setIsSearching(true);
+    setHasSearched(true);
+    if (!isSubsequentBatch) {
+      setLeads([]);
+      setSearchSummary(null);
+      setSearchStatus(null);
+      setPipelineStats(null);
+      setProviderStats(null);
+      setPipelineBreakdown(null);
+    }
+    setStatusReason(null);
     setSearchErrorMessage(null);
     setLiveProgressLog([]);
 
@@ -143,6 +172,8 @@ export default function DashboardClient() {
           contactFilter: criteria.contact,
           websiteFilter: criteria.website,
           limit: criteria.limit,
+          offset: criteria.offset ?? 0,
+          page: criteria.page ?? 1,
           minRating: criteria.minRating,
           minReviews: criteria.minReviews,
           excludePerfectRating: criteria.excludePerfectRating,
@@ -159,10 +190,12 @@ export default function DashboardClient() {
       if (!initialData.success && initialData.status === 'FAILED') {
         setIsSearching(false);
         setHasSearched(true);
-        setLeads([]);
-        setSearchSummary(null);
+        if (!isSubsequentBatch) {
+          setLeads([]);
+          setSearchSummary(null);
+          setPipelineStats(null);
+        }
         setSearchStatus('FAILED');
-        setPipelineStats(null);
         setStatusReason(initialData.error || 'Failed to dispatch search.');
         setSearchErrorMessage(initialData.error || 'Failed to dispatch search.');
         addToast('Search Notice', initialData.error || 'Failed to dispatch search.', 'warning');
@@ -173,55 +206,91 @@ export default function DashboardClient() {
       if (initialData.leads) {
         setIsSearching(false);
         setHasSearched(true);
-        setLeads(initialData.leads || []);
-        setSearchSummary(initialData.summary || null);
-        setSearchStatus(initialData.searchStatus || (initialData.leads.length > 0 ? 'COMPLETE' : 'NO_RESULTS'));
-        setPipelineStats(initialData.pipelineStats || null);
-        setProviderStats(initialData.providerStats || null);
-        setPipelineBreakdown(initialData.pipelineBreakdown || null);
-        setRotationStats(initialData.rotationStats || null);
-        setRejectedCandidates(initialData.rejectedCandidates || []);
-        setRejectionReasons(initialData.rejectionReasons || null);
-        setStatusReason(initialData.statusReason || null);
-        setSearchErrorMessage(null);
+        if (typeof initialData.nextOffset === 'number') {
+          setCurrentSearchOffset(initialData.nextOffset);
+        } else {
+          setCurrentSearchOffset((criteria.offset || 0) + (criteria.limit || 5));
+        }
 
-        if (initialData.leads.length > 0) {
-          const isPartial = initialData.searchStatus === 'PARTIAL';
-          const deliveredCount = initialData.leads.length;
-          const requestedCount = criteria.limit || 50;
-          const title = isPartial
-            ? `Discovery Complete (${deliveredCount}/${requestedCount} Leads)`
-            : `Discovery Complete (${deliveredCount} Qualified Leads)`;
-          const message = isPartial
-            ? `Delivered ${deliveredCount} of ${requestedCount} leads across all configured discovery providers in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`
-            : `Discovered and verified ${deliveredCount} venues in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`;
-
-          addToast(title, message, isPartial ? 'info' : 'success');
-
-          // If background enrichment jobs were queued, progressively update leads in background (Section 14)
-          if (initialData.backgroundJobsQueued > 0 && initialData.jobId) {
-            (async () => {
-              for (let p = 0; p < 8; p++) {
-                await new Promise((r) => setTimeout(r, 2000));
-                try {
-                  const bgRes = await fetch(`/api/leads/search/${initialData.jobId}/results`);
-                  if (bgRes.ok) {
-                    const bgData = await bgRes.json();
-                    if (bgData.leads && bgData.leads.length > 0) {
-                      setLeads(bgData.leads);
-                      if (bgData.summary) setSearchSummary(bgData.summary);
+        if (isSubsequentBatch) {
+          if (initialData.leads.length > 0) {
+            setLeads((prevLeads) => {
+              const existingIds = new Set(prevLeads.map((l) => l.id));
+              const existingNames = new Set(prevLeads.map((l) => (l.businessName || '').toLowerCase().trim()));
+              const brandNew = initialData.leads.filter(
+                (l: Lead) => !existingIds.has(l.id) && !existingNames.has((l.businessName || '').toLowerCase().trim())
+              );
+              return [...prevLeads, ...brandNew];
+            });
+            if (initialData.summary) {
+              setSearchSummary((prev) =>
+                prev
+                  ? {
+                      ...initialData.summary,
+                      total: (prev.total || 0) + (initialData.summary.total || initialData.leads.length),
                     }
-                  }
-                } catch {}
-              }
-            })();
+                  : initialData.summary
+              );
+            }
+            addToast('Next Batch Loaded', `Found ${initialData.leads.length} new businesses.`, 'success');
+          } else {
+            const noMoreMsg =
+              initialData.statusReason || 'No more businesses found in this area. Try a different location or category.';
+            setStatusReason(noMoreMsg);
+            addToast('Search Complete', noMoreMsg, 'info');
           }
         } else {
-          addToast(
-            'Search Complete',
-            `No matching businesses found in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
-            'info'
-          );
+          setLeads(initialData.leads || []);
+          setSearchSummary(initialData.summary || null);
+          setSearchStatus(initialData.searchStatus || (initialData.leads.length > 0 ? 'COMPLETE' : 'NO_RESULTS'));
+          setPipelineStats(initialData.pipelineStats || null);
+          setProviderStats(initialData.providerStats || null);
+          setPipelineBreakdown(initialData.pipelineBreakdown || null);
+          setRotationStats(initialData.rotationStats || null);
+          setRejectedCandidates(initialData.rejectedCandidates || []);
+          setRejectionReasons(initialData.rejectionReasons || null);
+          setStatusReason(initialData.statusReason || null);
+          setSearchErrorMessage(null);
+          handleScrollToLeads();
+
+          if (initialData.leads.length > 0) {
+            const isPartial = initialData.searchStatus === 'PARTIAL';
+            const deliveredCount = initialData.leads.length;
+            const requestedCount = criteria.limit || 5;
+            const title = isPartial
+              ? `Discovery Complete (${deliveredCount}/${requestedCount} Leads)`
+              : `Discovery Complete (${deliveredCount} Qualified Leads)`;
+            const message = isPartial
+              ? `Delivered ${deliveredCount} of ${requestedCount} leads across all configured discovery providers in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`
+              : `Discovered and verified ${deliveredCount} venues in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`;
+
+            addToast(title, message, isPartial ? 'info' : 'success');
+
+            // If background enrichment jobs were queued, progressively update leads in background
+            if (initialData.backgroundJobsQueued > 0 && initialData.jobId) {
+              (async () => {
+                for (let p = 0; p < 8; p++) {
+                  await new Promise((r) => setTimeout(r, 2000));
+                  try {
+                    const bgRes = await fetch(`/api/leads/search/${initialData.jobId}/results`);
+                    if (bgRes.ok) {
+                      const bgData = await bgRes.json();
+                      if (bgData.leads && bgData.leads.length > 0) {
+                        setLeads(bgData.leads);
+                        if (bgData.summary) setSearchSummary(bgData.summary);
+                      }
+                    }
+                  } catch {}
+                }
+              })();
+            }
+          } else {
+            addToast(
+              'Search Complete',
+              `No matching businesses found in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
+              'info'
+            );
+          }
         }
         return;
       }
@@ -256,63 +325,99 @@ export default function DashboardClient() {
 
           setIsSearching(false);
           setHasSearched(true);
+          if (typeof resultsData.nextOffset === 'number') {
+            setCurrentSearchOffset(resultsData.nextOffset);
+          } else {
+            setCurrentSearchOffset((criteria.offset || 0) + (criteria.limit || 5));
+          }
 
           if (resultsData.success) {
-            setLeads(resultsData.leads || []);
-            setSearchSummary(resultsData.summary || null);
-            setSearchStatus(resultsData.searchStatus || (resultsData.leads?.length > 0 ? 'COMPLETE' : 'NO_RESULTS'));
-            setPipelineStats(resultsData.pipelineStats || null);
-            setProviderStats(resultsData.providerStats || null);
-            setPipelineBreakdown(resultsData.pipelineBreakdown || null);
-            setRotationStats(resultsData.rotationStats || null);
-            setRejectedCandidates(resultsData.rejectedCandidates || []);
-            setRejectionReasons(resultsData.rejectionReasons || null);
-            setStatusReason(resultsData.statusReason || null);
-            setSearchErrorMessage(null);
-
-            if (resultsData.leads && resultsData.leads.length > 0) {
-              const isPartial = resultsData.searchStatus === 'PARTIAL';
-              const deliveredCount = resultsData.leads.length;
-              const requestedCount = criteria.limit || 50;
-              const title = isPartial
-                ? `Discovery Complete (${deliveredCount}/${requestedCount} Leads)`
-                : `Discovery Complete (${deliveredCount} Qualified Leads)`;
-              const message = isPartial
-                ? `Delivered ${deliveredCount} of ${requestedCount} leads across all configured discovery providers in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`
-                : `Discovered and verified ${deliveredCount} venues in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`;
-
-              addToast(title, message, isPartial ? 'info' : 'success');
-
-              // If background enrichment jobs were queued, progressively update leads in background
-              if (resultsData.backgroundJobsQueued > 0) {
-                (async () => {
-                  for (let p = 0; p < 8; p++) {
-                    await new Promise((r) => setTimeout(r, 2000));
-                    try {
-                      const bgRes = await fetch(`/api/leads/search/${jobId}/results`);
-                      if (bgRes.ok) {
-                        const bgData = await bgRes.json();
-                        if (bgData.leads && bgData.leads.length > 0) {
-                          setLeads(bgData.leads);
-                          if (bgData.summary) setSearchSummary(bgData.summary);
+            if (isSubsequentBatch) {
+              if (resultsData.leads && resultsData.leads.length > 0) {
+                setLeads((prevLeads) => {
+                  const existingIds = new Set(prevLeads.map((l) => l.id));
+                  const existingNames = new Set(prevLeads.map((l) => (l.businessName || '').toLowerCase().trim()));
+                  const brandNew = (resultsData.leads || []).filter(
+                    (l: Lead) => !existingIds.has(l.id) && !existingNames.has((l.businessName || '').toLowerCase().trim())
+                  );
+                  return [...prevLeads, ...brandNew];
+                });
+                if (resultsData.summary) {
+                  setSearchSummary((prev) =>
+                    prev
+                      ? {
+                          ...resultsData.summary,
+                          total: (prev.total || 0) + (resultsData.summary.total || resultsData.leads.length),
                         }
-                      }
-                    } catch {}
-                  }
-                })();
+                      : resultsData.summary
+                  );
+                }
+                addToast('Next Batch Loaded', `Found ${resultsData.leads.length} new businesses.`, 'success');
+              } else {
+                const noMoreMsg =
+                  resultsData.statusReason || 'No more businesses found in this area. Try a different location or category.';
+                setStatusReason(noMoreMsg);
+                addToast('Search Complete', noMoreMsg, 'info');
               }
             } else {
-              addToast(
-                'Search Complete',
-                `No matching businesses found in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
-                'info'
-              );
+              setLeads(resultsData.leads || []);
+              setSearchSummary(resultsData.summary || null);
+              setSearchStatus(resultsData.searchStatus || (resultsData.leads?.length > 0 ? 'COMPLETE' : 'NO_RESULTS'));
+              setPipelineStats(resultsData.pipelineStats || null);
+              setProviderStats(resultsData.providerStats || null);
+              setPipelineBreakdown(resultsData.pipelineBreakdown || null);
+              setRotationStats(resultsData.rotationStats || null);
+              setRejectedCandidates(resultsData.rejectedCandidates || []);
+              setRejectionReasons(resultsData.rejectionReasons || null);
+              setStatusReason(resultsData.statusReason || null);
+              setSearchErrorMessage(null);
+
+              if (resultsData.leads && resultsData.leads.length > 0) {
+                const isPartial = resultsData.searchStatus === 'PARTIAL';
+                const deliveredCount = resultsData.leads.length;
+                const requestedCount = criteria.limit || 50;
+                const title = isPartial
+                  ? `Discovery Complete (${deliveredCount}/${requestedCount} Leads)`
+                  : `Discovery Complete (${deliveredCount} Qualified Leads)`;
+                const message = isPartial
+                  ? `Delivered ${deliveredCount} of ${requestedCount} leads across all configured discovery providers in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`
+                  : `Discovered and verified ${deliveredCount} venues in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`;
+
+                addToast(title, message, isPartial ? 'info' : 'success');
+
+                // If background enrichment jobs were queued, progressively update leads in background
+                if (resultsData.backgroundJobsQueued > 0) {
+                  (async () => {
+                    for (let p = 0; p < 8; p++) {
+                      await new Promise((r) => setTimeout(r, 2000));
+                      try {
+                        const bgRes = await fetch(`/api/leads/search/${jobId}/results`);
+                        if (bgRes.ok) {
+                          const bgData = await bgRes.json();
+                          if (bgData.leads && bgData.leads.length > 0) {
+                            setLeads(bgData.leads);
+                            if (bgData.summary) setSearchSummary(bgData.summary);
+                          }
+                        }
+                      } catch {}
+                    }
+                  })();
+                }
+              } else {
+                addToast(
+                  'Search Complete',
+                  `No matching businesses found in ${criteria.city ? `${criteria.city}, ` : ''}${criteria.state}.`,
+                  'info'
+                );
+              }
             }
           } else {
-            setLeads([]);
-            setSearchSummary(null);
+            if (!isSubsequentBatch) {
+              setLeads([]);
+              setSearchSummary(null);
+              setPipelineStats(null);
+            }
             setSearchStatus('FAILED');
-            setPipelineStats(null);
             setStatusReason(resultsData.error || 'Job failed.');
             setSearchErrorMessage(resultsData.error || 'Job failed.');
             addToast('Search Notice', resultsData.error || 'Job failed.', 'warning');
@@ -327,11 +432,13 @@ export default function DashboardClient() {
     } catch (err: any) {
       setIsSearching(false);
       setHasSearched(true);
-      setLeads([]);
-      setSearchSummary(null);
+      if (!isSubsequentBatch) {
+        setLeads([]);
+        setSearchSummary(null);
+        setPipelineStats(null);
+        setRotationStats(null);
+      }
       setSearchStatus('FAILED');
-      setPipelineStats(null);
-      setRotationStats(null);
       const msg = err instanceof LeadPilotApiError
         ? `${err.message}`
         : (err.message || 'Unable to connect to business search service.');
@@ -340,6 +447,27 @@ export default function DashboardClient() {
       addToast('Search Notice', msg, 'warning');
     }
 
+  };
+
+  const handleLoadMore = () => {
+    if (isSearching) return;
+    const batchLimit = Number(lastSearchCriteria?.limit || 5);
+    const nextOffset = currentSearchOffset;
+    const baseCriteria: LeadFilterCriteria = lastSearchCriteria || {
+      country: 'USA',
+      state: 'California',
+      city: 'Los Angeles',
+      industry: 'Restaurants',
+      contact: 'All Contacts',
+      website: 'All Websites',
+      limit: batchLimit as NumberOfLeads,
+    };
+    const nextCriteria: LeadFilterCriteria = {
+      ...baseCriteria,
+      offset: nextOffset,
+      page: Math.floor(nextOffset / batchLimit) + 1,
+    };
+    handleLeadSearchSubmit(nextCriteria);
   };
 
   const handleScrollToLeads = () => {
@@ -381,6 +509,7 @@ export default function DashboardClient() {
                 onSearchStart={handleLeadSearchStart}
                 onSearchSubmit={handleLeadSearchSubmit}
                 onViewLeads={handleScrollToLeads}
+                currentOffset={currentSearchOffset}
               />
 
               {/* Dedicated Search Results Section */}
@@ -396,12 +525,15 @@ export default function DashboardClient() {
                 rejectionReasons={rejectionReasons}
                 statusReason={statusReason}
                 errorMessage={searchErrorMessage}
-                onSelectLead={setSelectedLead}
+                onSelectLead={handleSelectLead}
+                onEnrichLead={handleEnrichLead}
                 onQuickAudit={handleOpenQuickAudit}
                 onOpenExportModal={handleOpenExport}
                 onShowToast={addToast}
                 hasSearched={hasSearched}
                 isSearching={isSearching}
+                onLoadMore={handleLoadMore}
+                currentOffset={currentSearchOffset}
               />
             </div>
           )}
@@ -429,12 +561,15 @@ export default function DashboardClient() {
                 rejectionReasons={rejectionReasons}
                 statusReason={statusReason}
                 errorMessage={searchErrorMessage}
-                onSelectLead={setSelectedLead}
+                onSelectLead={handleSelectLead}
+                onEnrichLead={handleEnrichLead}
                 onQuickAudit={handleOpenQuickAudit}
                 onOpenExportModal={handleOpenExport}
                 onShowToast={addToast}
                 hasSearched={true}
                 isSearching={false}
+                onLoadMore={handleLoadMore}
+                currentOffset={currentSearchOffset}
               />
             </div>
           )}
@@ -498,6 +633,7 @@ export default function DashboardClient() {
       {/* 7. Slide-over Lead Detail Drawer */}
       <LeadDetailDrawer
         lead={selectedLead}
+        initialTab={leadDetailTab}
         onClose={() => setSelectedLead(null)}
         onQuickAudit={handleOpenQuickAudit}
         onShowToast={addToast}

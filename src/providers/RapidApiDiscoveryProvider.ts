@@ -8,6 +8,7 @@ import { rapidApiCircuitBreaker } from '@/lib/resilience/CircuitBreaker';
 import { semaphores, getTimeoutConfig } from '@/lib/config/concurrencyConfig';
 import { normalizePhone } from '@/utils/phoneUtils';
 import { canonicalizeUrl } from '@/utils/urlUtils';
+import { logger } from '@/utils/logger';
 
 /**
  * RapidAPI Maps Data Provider Adapter
@@ -224,18 +225,23 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
 
   /**
    * Normalizes an individual place item from RapidAPI Maps Data into canonical RawDiscoveredBusiness schema.
-   * Completely decoupled from provider-internal key names.
+   * Accurately maps real response fields (phone_number, website/site, review_count, rating, place_id).
    */
   public mapRapidApiItemToBusiness(item: any, params: SearchDiscoveryParams): RawDiscoveredBusiness {
-    const name = String(item.name || item.title || 'Unnamed Business').trim();
+    const name = String(item.name || item.title || item.business_name || 'Unnamed Business').trim();
     const address = String(
       item.full_address || item.address || item.formatted_address || `${params.city || ''} ${params.state}`
     ).trim();
 
-    const rawPhone = item.phone || item.phone_number || item.telephone;
-    const phone = rawPhone ? normalizePhone(String(rawPhone)) : undefined;
+    const rawPhone =
+      item.phone_number ||
+      item.phone ||
+      item.telephone ||
+      item.contact_phone ||
+      (Array.isArray(item.phone_numbers) && item.phone_numbers.length > 0 ? item.phone_numbers[0] : undefined);
+    const phone = rawPhone ? normalizePhone(String(rawPhone), params.country) : undefined;
 
-    const rawWebsite = item.site || item.website || item.website_url;
+    const rawWebsite = item.website || item.site || item.website_url || item.url;
     const website = rawWebsite ? canonicalizeUrl(String(rawWebsite)) : undefined;
 
     const placeId = item.place_id || item.business_id || item.google_id || item.id;
@@ -252,15 +258,34 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
       : [params.industry];
 
     const category = item.type || (types.length > 0 ? types[0] : params.industry);
-    const rating = typeof item.rating === 'number' ? item.rating : null;
-    const userRatingCount =
-      typeof item.reviews === 'number'
-        ? item.reviews
-        : typeof item.reviews_data === 'number'
-        ? item.reviews_data
-        : typeof item.review_count === 'number'
-        ? item.review_count
+
+    const rawRating = item.rating ?? item.stars ?? item.score;
+    const parsedRating = typeof rawRating === 'number' ? rawRating : (rawRating ? parseFloat(String(rawRating)) : null);
+    const rating = typeof parsedRating === 'number' && !isNaN(parsedRating) ? parsedRating : null;
+
+    const rawReviews =
+      item.review_count ??
+      item.reviews ??
+      item.reviews_data ??
+      item.rating_count ??
+      item.user_ratings_total;
+    const parsedReviews =
+      typeof rawReviews === 'number'
+        ? rawReviews
+        : rawReviews
+        ? parseInt(String(rawReviews).replace(/\D/g, ''), 10)
         : null;
+    const userRatingCount = typeof parsedReviews === 'number' && !isNaN(parsedReviews) ? parsedReviews : null;
+
+    const isClosed = item.is_permanently_closed === true || item.business_status === 'CLOSED_PERMANENTLY';
+    const isTempClosed = item.is_temporarily_closed === true || item.business_status === 'CLOSED_TEMPORARILY';
+    const businessStatus = isClosed
+      ? 'CLOSED_PERMANENTLY'
+      : isTempClosed
+      ? 'CLOSED_TEMPORARILY'
+      : (item.business_status || item.status || 'OPERATIONAL');
+
+    const positiveReviewDataAvailable = Boolean(rating !== null && rating >= 4.0 && (userRatingCount || 0) > 0);
 
     const latitude =
       typeof item.latitude === 'number'
@@ -284,10 +309,33 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
 
     const sourceUrl =
       item.location_link ||
+      item.place_link ||
       item.google_maps_url ||
       (placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : undefined);
 
-    const businessStatus = item.business_status || item.status || 'OPERATIONAL';
+    // Extract genuine city/state from provider item fields or address components
+    let itemCity = item.city || item.town || item.municipality;
+    let itemState = item.state || item.region || item.province;
+    let itemCountry = item.country;
+
+    // Parse city from address if omitted by provider
+    if (!itemCity && address) {
+      const parts = address.split(',').map((s: string) => s.trim());
+      if (parts.length >= 2) {
+        if (parts.length >= 3) {
+          itemCity = parts[parts.length - 2].replace(/\s+\b[A-Z]{2}\b.*$/i, '').trim();
+        } else {
+          itemCity = parts[0];
+        }
+      }
+    }
+
+    if (!itemCountry && address) {
+      const aLower = address.toLowerCase();
+      if (aLower.includes(', usa') || aLower.includes(', united states')) itemCountry = 'USA';
+      else if (aLower.includes(', canada')) itemCountry = 'Canada';
+      else if (aLower.includes(', india')) itemCountry = 'India';
+    }
 
     return {
       source: 'rapidapi',
@@ -299,8 +347,9 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
       businessName: name,
       category,
       address,
-      city: item.city || params.city,
-      state: item.state || item.region || params.state,
+      city: itemCity || item.city || (params.city && address.toLowerCase().includes(params.city.toLowerCase()) ? params.city : undefined),
+      state: itemState || item.state || (params.state && address.toLowerCase().includes(params.state.toLowerCase()) ? params.state : undefined),
+      country: itemCountry || (item as any).country,
       postalCode: postalCode ? String(postalCode) : undefined,
       postcode: postalCode ? String(postalCode) : undefined,
       latitude: Number.isFinite(latitude) ? latitude : undefined,
@@ -313,13 +362,16 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
       rating,
       userRatingCount,
       businessStatus,
+      positiveReviewDataAvailable,
       rawTags: {
         rapidapiPlaceId: placeId,
         types,
         rating,
         userRatingCount,
-        reviewsCount: item.reviews,
-        country: item.country,
+        reviewCount: userRatingCount,
+        reviewsCount: userRatingCount,
+        country: itemCountry || item.country,
+        isPermanentlyClosed: isClosed,
       },
       sourceEvidence: [
         {
@@ -330,7 +382,7 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
             placeId,
             rating,
             userRatingCount,
-            country: item.country,
+            country: itemCountry || item.country,
           },
         },
       ],
@@ -400,7 +452,10 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
     if (RapidApiDiscoveryProvider.simulateResults !== null) {
       const simList = RapidApiDiscoveryProvider.simulateResults;
       const maxLimit = isHnwActive ? 25 : parseInt(process.env.MAX_LEADS_PER_RUN || '20', 10);
-      const clampedSimList = simList.slice(0, maxLimit);
+      const batchLimit = params.limit ? Math.min(params.limit, maxLimit) : maxLimit;
+      const offset = Math.max(Number(params.offset) || 0, 0);
+      const clampedSimList = simList.slice(offset, offset + batchLimit);
+      const isExhausted = clampedSimList.length === 0 && offset > 0;
       return {
         providerId: this.providerId,
         providerName: this.name,
@@ -409,7 +464,9 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
         businesses: clampedSimList,
         sourceComplete: clampedSimList.length > 0,
         status: clampedSimList.length > 0 ? 'SUCCESS' : 'NO_RESULTS',
-        statusReason: `Discovered ${clampedSimList.length} places via RapidAPI Maps Data (Simulated).`,
+        statusReason: isExhausted
+          ? 'No more businesses found in this area. Try a different location or category.'
+          : `Discovered ${clampedSimList.length} places via RapidAPI Maps Data (Simulated).`,
         pagesRequested: 1,
         errors: [],
         durationMs: 120,
@@ -442,9 +499,10 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
     if (isMockMode) {
       const maxLeadsAllowed = isHnwActive ? 25 : parseInt(process.env.MAX_LEADS_PER_RUN || '20', 10);
       const demoCount = Math.min(Math.max(params.limit || (isHnwActive ? 25 : 10), 1), maxLeadsAllowed);
+      const offset = Math.max(Number(params.offset) || 0, 0);
       const isIndia = countryParam.toLowerCase().includes('in') || countryParam.toLowerCase().includes('india');
       const demoBusinesses: RawDiscoveredBusiness[] = Array.from({ length: demoCount }, (_, idx) => {
-        const id = idx + 1;
+        const id = offset + idx + 1;
         const name = `[DEMO MOCK] ${params.industry} Demo Company ${id}`;
         // Standard fictional phone ranges (RFC/NANP 555-01xx for US/CA, 99999 for IN)
         const demoPhone = isIndia ? `+91 99999 000${id.toString().padStart(2, '0')}` : `+1 (555) 01${id.toString().padStart(2, '0')}`;
@@ -546,14 +604,18 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
       // Hard enforce server-side MAX_LEADS_PER_RUN (or 25 for High-Net-Worth batch)
       const maxLeadsAllowed = isHnwActive ? 25 : parseInt(process.env.MAX_LEADS_PER_RUN || '20', 10);
       const targetLimit = Math.min(Math.max(params.limit || (isHnwActive ? 25 : 10), 1), maxLeadsAllowed);
+      const requestedOffset = Math.max(Number(params.offset) || 0, 0);
+      const requestedPage = params.page || Math.floor(requestedOffset / targetLimit) + 1;
+      const apiLimit = requestedOffset > 0 ? Math.min(targetLimit + requestedOffset, 100) : targetLimit;
 
       const { url, hostHeader } = this.resolveGatewayEndpoint();
 
       url.searchParams.set('query', cleanQuery);
-      url.searchParams.set('limit', String(targetLimit));
+      url.searchParams.set('limit', String(apiLimit));
       url.searchParams.set('country', countryCode);
       url.searchParams.set('lang', 'en');
-      url.searchParams.set('offset', '0');
+      url.searchParams.set('offset', String(requestedOffset));
+      url.searchParams.set('page', String(requestedPage));
 
       // 4. Resilient execution under RapidAPI Circuit Breaker
       const discoveryResult = await rapidApiCircuitBreaker.execute(async () => {
@@ -629,6 +691,22 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
         rawItems = discoveryResult;
       }
 
+      // If the provider returned results from index 0 instead of honoring the offset directly,
+      // slice based on requestedOffset to ensure paginated non-duplicate results
+      if (requestedOffset > 0 && rawItems.length > targetLimit) {
+        rawItems = rawItems.slice(requestedOffset, requestedOffset + targetLimit);
+      }
+
+      logger.info({
+        actorId: 'rapidapi_discovery',
+        message: 'RapidAPI Query Dispatched',
+        extra: {
+          actualProviderQuery: cleanQuery,
+          countryParam: countryCode,
+          limitParam: targetLimit,
+        },
+      });
+
       // 6. Normalize and perform geographic verification on returned candidates
       const businesses: RawDiscoveredBusiness[] = [];
       const seenIds = new Set<string>();
@@ -636,18 +714,39 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
       for (const item of rawItems) {
         if (!item || (!item.name && !item.title)) continue;
 
+        const itemAddr = String(item.full_address || item.address || item.formatted_address || '').toLowerCase();
+        const itemCountryLower = String(item.country || '').toLowerCase().trim();
+
         // Verify returned country/location if returned by provider
-        if (item.country) {
-          const itemCountryLower = String(item.country).toLowerCase().trim();
-          const expectedCode = countryCode;
-          // Check if item country contradicts the requested country
+        if (countryCode === 'in') {
           if (
-            (expectedCode === 'in' && !itemCountryLower.includes('in') && !itemCountryLower.includes('india')) ||
-            (expectedCode === 'us' && !itemCountryLower.includes('us') && !itemCountryLower.includes('united states') && !itemCountryLower.includes('usa')) ||
-            (expectedCode === 'ca' && !itemCountryLower.includes('ca') && !itemCountryLower.includes('canada'))
+            (itemCountryLower && !itemCountryLower.includes('in') && !itemCountryLower.includes('india')) ||
+            itemAddr.includes(', usa') ||
+            itemAddr.includes(', united states') ||
+            itemAddr.includes(', canada') ||
+            /\b(atlanta|los angeles|chicago|houston|phoenix|dallas|seattle|miami|new york)\b/i.test(itemAddr) ||
+            /\b[A-Z]{2}\s+\d{5}(-\d{4})?\b/.test(item.full_address || item.address || '')
           ) {
-            // Discard candidate: geographic mismatch
-            continue;
+            continue; // Geographic mismatch
+          }
+        } else if (countryCode === 'us') {
+          if (
+            (itemCountryLower && !itemCountryLower.includes('us') && !itemCountryLower.includes('united states') && !itemCountryLower.includes('usa')) ||
+            itemAddr.includes(', canada') ||
+            itemAddr.includes(', india') ||
+            /\b(mumbai|delhi|bengaluru|bangalore|hyderabad|chennai|kolkata|pune|ahmedabad)\b/i.test(itemAddr) ||
+            /\b\d{6}\b/.test(item.full_address || item.address || '')
+          ) {
+            continue; // Geographic mismatch
+          }
+        } else if (countryCode === 'ca') {
+          if (
+            (itemCountryLower && !itemCountryLower.includes('ca') && !itemCountryLower.includes('canada')) ||
+            itemAddr.includes(', usa') ||
+            itemAddr.includes(', united states') ||
+            itemAddr.includes(', india')
+          ) {
+            continue; // Geographic mismatch
           }
         }
 
@@ -663,11 +762,24 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
         }
       }
 
+      logger.info({
+        actorId: 'rapidapi_discovery',
+        message: 'RapidAPI Candidates Received & Filtered',
+        extra: {
+          apiRequestsCount: 1,
+          rawCandidatesReturned: rawItems.length,
+          geographicallyValidCandidates: businesses.length,
+          targetLimit,
+        },
+      });
+
       const durationMs = Date.now() - startTime;
       const status = businesses.length > 0 ? 'SUCCESS' : 'NO_RESULTS';
       const statusReason =
         businesses.length > 0
           ? `Discovered ${businesses.length} verified businesses via RapidAPI Maps Data.`
+          : requestedOffset > 0
+          ? 'No more businesses found in this area. Try a different location or category.'
           : `RapidAPI queried successfully but returned zero results for ${params.industry} in ${resolvedArea}.`;
 
       return {
@@ -844,15 +956,21 @@ export class RapidApiDiscoveryProvider implements BusinessDiscoveryProvider {
       else if (Array.isArray(data?.results)) rawItems = data.results;
       else if (Array.isArray(data)) rawItems = data;
 
-      const sampleVenues = rawItems.slice(0, targetLimit).map((item) => ({
-        name: String(item.name || item.title || 'Unknown'),
-        address: item.full_address || item.address || undefined,
-        phone: item.phone || item.phone_number || undefined,
-        website: item.site || item.website || undefined,
-        rating: typeof item.rating === 'number' ? item.rating : null,
-        userRatingCount: typeof item.reviews === 'number' ? item.reviews : (typeof item.reviews_data === 'number' ? item.reviews_data : null),
-        placeId: item.place_id || item.business_id || undefined,
-      }));
+      const sampleVenues = rawItems.slice(0, targetLimit).map((item) => {
+        const rawReviews = item.review_count ?? item.reviews ?? item.reviews_data ?? item.rating_count;
+        const parsedReviews = typeof rawReviews === 'number' ? rawReviews : (rawReviews ? parseInt(String(rawReviews).replace(/\D/g, ''), 10) : null);
+        const userRatingCount = typeof parsedReviews === 'number' && !isNaN(parsedReviews) ? parsedReviews : null;
+        const rawPhone = item.phone_number || item.phone || undefined;
+        return {
+          name: String(item.name || item.title || 'Unknown'),
+          address: item.full_address || item.address || undefined,
+          phone: rawPhone ? normalizePhone(String(rawPhone), country) : undefined,
+          website: item.website || item.site || undefined,
+          rating: typeof item.rating === 'number' ? item.rating : null,
+          userRatingCount,
+          placeId: item.place_id || item.business_id || undefined,
+        };
+      });
 
       return {
         success: true,
