@@ -331,10 +331,11 @@ export class LeadPilotOrchestrator {
       }));
 
       // --- STAGE 1: Fast Business Discovery (RapidAPI Primary + Multi-Provider Fallback) ---
-      const maxCeiling = parseInt(process.env.MAX_LEADS_PER_RUN || '20', 10);
-      const targetDiscoveryPool = job.highNetWorthFilter
-        ? maxCeiling
-        : Math.min(Math.max(job.requestedLeads * 2, 10), maxCeiling);
+      // Section 2: When financial toggle is OFF, requested limit must be respected without artificial multipliers.
+      // When financial toggle is ON, make ONE call with hard cap of 25 candidates to save API credits.
+      const isHnw = Boolean(job.highNetWorthFilter || (criteria as any).highNetWorthOnly);
+      const hnwBudget = 25; // Action Item 3: Hard cap of 25 candidates
+      const targetDiscoveryPool = isHnw ? hnwBudget : job.requestedLeads;
       timestamps.googleStart = Date.now();
       const discoveryOutput = await this.executeTrackedActor(
         businessDiscoveryActor,
@@ -346,6 +347,8 @@ export class LeadPilotOrchestrator {
           country: verifiedCountry,
           limit: targetDiscoveryPool,
           bbox,
+          highNetWorthFilter: isHnw,
+          highNetWorthOnly: isHnw,
         },
         'Discovering businesses (RapidAPI Primary + Multi-Provider Fallback)...'
       );
@@ -655,10 +658,10 @@ export class LeadPilotOrchestrator {
         Number(process.env.CANDIDATE_PROCESSING_CONCURRENCY) || 12,
         20
       );
-      const hnwBudget = Math.min(Number(process.env.MAX_HNW_CANDIDATE_BUDGET) || 20, maxCeiling);
-      const targetQualifiedQuota = Math.min(contactPassedCandidates.length, job.highNetWorthFilter ? hnwBudget : job.requestedLeads);
+      const maxCandidatesToScan = job.highNetWorthFilter ? 25 : job.requestedLeads;
+      const targetQualifiedQuota = job.requestedLeads;
 
-      console.log(`[Pipeline Stage 2: Validation] Location/Category verified: ${businessVerificationOutput.verified.length} / ${allCandidates.length} | Deduplicated: ${deduplicationOutput.unique.length} | Contact criteria passed (${criteria.contactFilter}): ${contactPassedCandidates.length} | Target quota: ${targetQualifiedQuota} | Website filter: ${userWebsiteFilter}`);
+      console.log(`[Pipeline Stage 2: Validation] Location/Category verified: ${businessVerificationOutput.verified.length} / ${allCandidates.length} | Deduplicated: ${deduplicationOutput.unique.length} | Contact criteria passed (${criteria.contactFilter}): ${contactPassedCandidates.length} | Target quota: ${targetQualifiedQuota} (Max scan: ${maxCandidatesToScan}) | Website filter: ${userWebsiteFilter}`);
       const evaluatedIndices = new Set<number>();
       let candidateQueueIndex = 0;
 
@@ -1184,7 +1187,7 @@ export class LeadPilotOrchestrator {
           }
 
           const idx = candidateQueueIndex++;
-          if (idx >= contactPassedCandidates.length) {
+          if (idx >= maxCandidatesToScan || idx >= contactPassedCandidates.length) {
             break;
           }
 
@@ -1464,25 +1467,48 @@ export class LeadPilotOrchestrator {
       if (deliveredEntities.length >= job.requestedLeads) {
         job.sourceStatus = 'COMPLETE';
         job.statusReason = job.highNetWorthFilter
-          ? `Discovered and qualified ${deliveredEntities.length} verified High-Net-Worth businesses (Net Worth ≥ ₹70 Cr INR).`
+          ? `Found ${deliveredEntities.length} verified leads matching ₹70 Cr+.`
           : `Discovered and qualified ${deliveredEntities.length} verified leads satisfying all criteria.`;
       } else if (deliveredEntities.length > 0) {
         job.sourceStatus = 'PARTIAL';
         job.statusReason = job.highNetWorthFilter
-          ? `Delivered ${deliveredEntities.length} of ${job.requestedLeads} qualified High-Net-Worth leads (Net Worth ≥ ₹70 Cr INR). Configured sources yielded ${deliveredEntities.length} qualified filers.`
+          ? `Found ${deliveredEntities.length} verified leads matching ₹70 Cr+. Scanned max limit of 25 local businesses.`
           : `Delivered ${deliveredEntities.length} of ${job.requestedLeads} qualified leads. Configured sources yielded ${deliveredEntities.length} matching venues.`;
       } else {
         job.sourceStatus = 'NO_RESULTS';
-        if (job.highNetWorthFilter) {
-          if (job.discovered === 0) {
-            job.statusReason = 'No businesses discovered in the requested location. Zero candidate records were available for financial qualification.';
-          } else if ((job.rejectionReasons.BELOW_FINANCIAL_THRESHOLD || 0) > 0) {
-            job.statusReason = `Discovered ${job.discovered} businesses with official financial records, but verified net worth was below the ₹70 Crore INR threshold. Zero businesses met the qualification threshold.`;
-          } else if ((job.rejectionReasons.INSUFFICIENT_FINANCIAL_EVIDENCE || 0) > 0) {
-            job.statusReason = `Discovered ${job.discovered} candidate businesses, but none had verifiable public financial filings or registry disclosures (SEC EDGAR, MCA, SEDAR+). All candidates were excluded as Insufficient Evidence.`;
-          } else {
-            job.statusReason = '0 businesses qualified for the verified Net Worth threshold (≥ ₹70 Cr INR). Candidates failed location, contact, or financial requirements.';
-          }
+        const providerFailure =
+          job.providerStats?.rapidapi?.status === 'FAILED' ||
+          job.providersReport?.rapidapi?.status === 'FAILED';
+
+        const locationOrCategoryRejections =
+          (job.rejectionReasons.OUTSIDE_LOCATION || 0) +
+          (job.rejectionReasons.UNKNOWN_LOCATION || 0) +
+          (job.rejectionReasons.INVALID_CATEGORY || 0) +
+          (job.rejectionReasons.WRONG_CATEGORY || 0) +
+          (job.rejectionReasons.CATEGORY_UNVERIFIED || 0) +
+          (job.rejectionReasons.MISSING_NAME || 0);
+
+        if (providerFailure) {
+          job.statusReason =
+            'Provider failure: Search provider encountered an error or quota exhaustion while querying candidates.';
+        } else if (job.discovered === 0) {
+          job.statusReason =
+            'No matching candidates found in the specified location and industry.';
+        } else if (job.highNetWorthFilter) {
+          job.statusReason =
+            '0 verified businesses found in this area. To save API limits, we searched a max of 25 candidates. Try a larger city (e.g., Mumbai) or turn off the ₹70 Cr filter.';
+        } else if (
+          locationOrCategoryRejections > 0 &&
+          (job.rejectionReasons.INSUFFICIENT_FINANCIAL_EVIDENCE || 0) === 0 &&
+          (job.rejectionReasons.BELOW_FINANCIAL_THRESHOLD || 0) === 0 &&
+          deliveredEntities.length === 0 &&
+          contactPassedCandidates.length === 0
+        ) {
+          job.statusReason = `Discovered ${job.discovered} candidates, but all were rejected for location or category mismatch. Zero candidates reached financial evaluation.`;
+        } else if ((job.rejectionReasons.BELOW_FINANCIAL_THRESHOLD || 0) > 0) {
+          job.statusReason = `Discovered ${job.discovered} businesses with official financial records, but verified net worth was below the ₹70 Crore INR threshold. Zero businesses met the qualification threshold.`;
+        } else if ((job.rejectionReasons.INSUFFICIENT_FINANCIAL_EVIDENCE || 0) > 0) {
+          job.statusReason = `Discovered ${job.discovered} candidate businesses, but none had verifiable public financial filings or registry disclosures (SEC EDGAR, MCA, SEDAR+). All candidates were excluded as Insufficient Evidence.`;
         } else {
           job.statusReason = `0 leads met the selected criteria.`;
         }
