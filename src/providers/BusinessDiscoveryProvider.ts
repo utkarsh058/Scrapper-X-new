@@ -5,6 +5,8 @@ export interface SearchDiscoveryParams {
   country?: string;
   keywords?: string[];
   limit: number;
+  offset?: number;
+  page?: number;
   bbox?: [number, number, number, number] | any;
   highNetWorthFilter?: boolean;
   highNetWorthOnly?: boolean;
@@ -24,6 +26,7 @@ export interface RawDiscoveredBusiness {
   address: string;
   city?: string;
   state?: string;
+  country?: string;
   postalCode?: string; // Normalized postal code
   postcode?: string; // Backwards compatible alias
   latitude?: number;

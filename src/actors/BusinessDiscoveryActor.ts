@@ -44,6 +44,7 @@ export interface BusinessDiscoveryOutput {
     directory: ProviderStat;
   };
   totalDiscovered: number;
+  apiRequestsCount?: number;
   rapidapiLatencyMs?: number;
   googleLatencyMs?: number;
   osmLatencyMs?: number;
@@ -179,6 +180,7 @@ export class BusinessDiscoveryActor extends BaseActor<SearchDiscoveryParams, Bus
         directory: dStat,
       },
       totalDiscovered: managerResult.totalDiscovered,
+      apiRequestsCount: (managerResult as any).apiRequestsCount || 1,
       rapidapiLatencyMs: managerResult.latencies.rapidapiMs || 0,
       googleLatencyMs: managerResult.latencies.googleMs,
       osmLatencyMs: managerResult.latencies.osmMs,

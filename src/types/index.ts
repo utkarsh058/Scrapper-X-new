@@ -182,6 +182,7 @@ export interface PipelineBreakdown {
   websiteNeedsImprovementCount?: number;
   finalQualifiedCount: number;
   deliveredCount?: number;
+  apiRequestsCount?: number;
 }
 
 export interface RejectedCandidateItem {
@@ -236,6 +237,8 @@ export interface SearchRequestPayload {
   contactFilter?: ContactFilter;
   websiteFilter?: WebsiteFilter;
   limit: number;
+  offset?: number;
+  page?: number;
   minRating?: number;
   minReviews?: number;
   excludePerfectRating?: boolean;

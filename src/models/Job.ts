@@ -6,6 +6,8 @@ export interface RejectionBreakdown {
   OUTSIDE_LOCATION: number;
   UNKNOWN_LOCATION?: number;
   INVALID_CATEGORY: number;
+  WRONG_CATEGORY?: number;
+  CATEGORY_UNVERIFIED?: number;
   MISSING_NAME: number;
   DUPLICATE: number;
   NO_CONTACT: number;
@@ -49,6 +51,7 @@ export interface PipelineBreakdown {
   websiteNeedsImprovementCount?: number;
   finalQualifiedCount: number;
   deliveredCount?: number;
+  apiRequestsCount?: number;
 }
 
 export interface RejectedCandidateItem {
@@ -121,6 +124,7 @@ export interface Job {
   sourceStatus: SearchStatusType;
   sourceComplete: boolean;
   statusReason?: string;
+  apiRequestsCount?: number;
 
   primaryProvider?: string;
   providerStats?: {

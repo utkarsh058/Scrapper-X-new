@@ -1369,7 +1369,7 @@ export class LeadPilotOrchestrator {
           message: `Location Rejected: ${rej.business.businessName}`,
           extra: {
             candidateName: rej.business.businessName,
-            normalizedCountry: rej.business.country || (rej.business as any).country || 'unknown',
+            normalizedCountry: (rej.business as any).country || 'unknown',
             normalizedState: rej.business.state || 'unknown',
             normalizedCity: rej.business.city || 'unknown',
             normalizedCategory: rej.business.category || 'unknown',
@@ -1403,7 +1403,7 @@ export class LeadPilotOrchestrator {
           message: `Category Rejected: ${rej.business.businessName}`,
           extra: {
             candidateName: rej.business.businessName,
-            normalizedCountry: rej.business.country || (rej.business as any).country || 'unknown',
+            normalizedCountry: (rej.business as any).country || 'unknown',
             normalizedState: rej.business.state || 'unknown',
             normalizedCity: rej.business.city || 'unknown',
             normalizedCategory: rej.business.category || 'unknown',
